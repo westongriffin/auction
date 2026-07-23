@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Print — Brinkley Auctions</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: #111; padding: 40px; max-width: 800px; margin: 0 auto; }
+  .head { display: flex; align-items: center; gap: 20px; border-bottom: 3px solid #c31f26; padding-bottom: 14px; margin-bottom: 20px; }
+  .head img { height: 80px; }
+  .head .biz h1 { font-size: 24px; color: #8e1013; }
+  .head .biz p { font-size: 13px; color: #444; white-space: pre-line; }
+  .doc-meta { display: flex; justify-content: space-between; margin-bottom: 18px; }
+  .doc-meta h2 { font-size: 20px; }
+  .doc-meta .sub, .sub { font-size: 13px; color: #444; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #ccc; font-size: 14px; }
+  th { border-bottom: 2px solid #333; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  td.num, th.num { text-align: right; }
+  .totals { margin-left: auto; width: 300px; }
+  .totals td { border: none; padding: 4px 8px; }
+  .totals tr.grand td { border-top: 2px solid #333; font-weight: bold; font-size: 17px; }
+  .footer { margin-top: 26px; font-size: 12px; color: #444; border-top: 1px solid #ccc; padding-top: 10px; }
+  .sig { margin-top: 44px; display: flex; gap: 40px; }
+  .sig div { flex: 1; border-top: 1px solid #333; padding-top: 4px; font-size: 12px; }
+  .badge { font-size: 11px; border: 1px solid #333; padding: 1px 7px; border-radius: 10px; }
+  .fill-line { border-bottom: 1px solid #999; height: 26px; }
+  h3 { margin: 18px 0 4px; font-size: 15px; }
+  .error { color: #b00; font-size: 16px; padding: 30px 0; }
+  @media print { body { padding: 0; } .noprint { display: none; } }
+</style>
+</head>
+<body>
+<div id="doc"><p class="sub">Preparing document…</p></div>
+<script>
+const q = new URLSearchParams(location.search);
+const token = localStorage.getItem('brinkley-token') || '';
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDate = (s) => (s ? new Date(s + (s.length === 10 ? 'T12:00:00' : '')).toLocaleDateString() : '');
+
+async function api(path) {
+  const res = await fetch(path, { headers: token ? { 'X-Auth': token } : {} });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load');
+  return data;
+}
+
+function head(s) {
+  return `<div class="head">
+    <img src="logo-small.png" alt="">
+    <div class="biz">
+      <h1>${esc(s.businessName)}</h1>
+      <p>${esc([s.address, s.phone].filter(Boolean).join('\n'))}</p>
+    </div>
+  </div>`;
+}
+
+async function render() {
+  const type = q.get('type');
+  const s = await api('/api/settings');
+  const [auctions, bidders, consignors, registrations, lots] = await Promise.all([
+    api('/api/auctions'), api('/api/bidders'), api('/api/consignors'),
+    api('/api/registrations'), api('/api/lots'),
+  ]);
+  const byId = (arr) => Object.fromEntries(arr.map((x) => [x.id, x]));
+  const A = byId(auctions), B = byId(bidders), C = byId(consignors), R = byId(registrations);
+  let html = head(s);
+
+  if (type === 'invoice') {
+    const inv = (await api('/api/invoices')).find((i) => i.id === q.get('id'));
+    if (!inv) throw new Error('Invoice not found');
+    const bidder = B[inv.bidderId] || {};
+    const auction = A[inv.auctionId] || {};
+    const balance = Math.round((inv.total - inv.amountPaid) * 100) / 100;
+    document.title = `INV-${inv.number} — ${s.businessName}`;
+    html += `
+      <div class="doc-meta">
+        <div>
+          <h2>${balance <= 0 && inv.status !== 'void' ? 'RECEIPT' : 'INVOICE'} INV-${inv.number} ${inv.status === 'void' ? '<span class="badge">VOID</span>' : ''}</h2>
+          <p class="sub">${esc(auction.title)}${auction.date ? ' · ' + fmtDate(auction.date) : ''}</p>
+          <p class="sub">Issued ${new Date(inv.createdAt).toLocaleDateString()}</p>
+        </div>
+        <div>
+          <strong>Paddle #${inv.paddle} — ${esc(bidder.name)}</strong>
+          <p class="sub">${esc([bidder.address, bidder.phone, bidder.email].filter(Boolean).join('\n'))}</p>
+          ${inv.taxExempt ? '<p class="sub"><span class="badge">TAX EXEMPT</span></p>' : ''}
+        </div>
+      </div>
+      <table>
+        <tr><th>Lot</th><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Amount</th></tr>
+        ${inv.lineItems.map((li) => `<tr><td>${li.lotNumber}</td><td>${esc(li.title)}</td>
+          <td class="num">${li.quantity}</td><td class="num">${money(li.hammerPrice)}</td><td class="num">${money(li.amount)}</td></tr>`).join('')}
+      </table>
+      <table class="totals">
+        <tr><td>Subtotal</td><td class="num">${money(inv.subtotal)}</td></tr>
+        <tr><td>Buyer's premium (${inv.premiumPct}%)</td><td class="num">${money(inv.premium)}</td></tr>
+        ${inv.tax ? `<tr><td>Sales tax (${inv.taxPct}%)</td><td class="num">${money(inv.tax)}</td></tr>` : ''}
+        <tr class="grand"><td>Total</td><td class="num">${money(inv.total)}</td></tr>
+        ${inv.payments.map((p) => `<tr><td>Paid — ${esc(p.method)}${p.note ? ' (' + esc(p.note) + ')' : ''} ${new Date(p.time).toLocaleDateString()}</td><td class="num">−${money(p.amount)}</td></tr>`).join('')}
+        ${inv.payments.length ? `<tr class="grand"><td>Balance due</td><td class="num">${money(balance)}</td></tr>` : ''}
+      </table>
+      <div class="footer">${esc(s.invoiceFooter)}</div>`;
+  }
+
+  else if (type === 'settlement') {
+    const st = (await api('/api/settlements')).find((x) => x.id === q.get('id'));
+    if (!st) throw new Error('Settlement not found');
+    const consignor = C[st.consignorId] || {};
+    const auction = A[st.auctionId] || {};
+    document.title = `ST-${st.number} — ${s.businessName}`;
+    html += `
+      <div class="doc-meta">
+        <div>
+          <h2>SELLER SETTLEMENT ST-${st.number} ${st.status === 'void' ? '<span class="badge">VOID</span>' : ''}</h2>
+          <p class="sub">${esc(auction.title)}${auction.date ? ' · ' + fmtDate(auction.date) : ''}</p>
+          <p class="sub">Issued ${new Date(st.createdAt).toLocaleDateString()}</p>
+        </div>
+        <div>
+          <strong>${esc(consignor.code)} — ${esc(consignor.name)}</strong>
+          <p class="sub">${esc([consignor.address, consignor.phone, consignor.email].filter(Boolean).join('\n'))}</p>
+        </div>
+      </div>
+      <table>
+        <tr><th>Lot</th><th>Description</th><th class="num">Qty</th><th class="num">Hammer</th><th class="num">Amount</th></tr>
+        ${st.lineItems.map((li) => `<tr><td>${li.lotNumber}</td><td>${esc(li.title)}</td>
+          <td class="num">${li.quantity}</td><td class="num">${money(li.hammerPrice)}</td><td class="num">${money(li.amount)}</td></tr>`).join('')}
+        ${st.passedItems.map((li) => `<tr><td>${li.lotNumber}</td><td>${esc(li.title)}</td><td class="num"></td><td class="num">no sale</td><td class="num">—</td></tr>`).join('')}
+      </table>
+      <table class="totals">
+        <tr><td>Gross hammer</td><td class="num">${money(st.grossHammer)}</td></tr>
+        <tr><td>Commission (${st.commissionPct}%)</td><td class="num">−${money(st.commission)}</td></tr>
+        <tr class="grand"><td>Net due to seller</td><td class="num">${money(st.netDue)}</td></tr>
+        ${st.status === 'paid' ? `<tr><td>Paid by ${esc(st.method)}</td><td class="num">${new Date(st.paidAt).toLocaleDateString()}</td></tr>` : ''}
+      </table>
+      <div class="sig"><div>Seller signature</div><div>Date</div></div>
+      <div class="footer">${esc(s.invoiceFooter)}</div>`;
+  }
+
+  else if (type === 'report') {
+    const r = await api('/api/reports/auction/' + q.get('auctionId'));
+    document.title = `Auction report — ${r.auction.title}`;
+    const row = (l, v) => `<tr><td>${l}</td><td class="num">${v}</td></tr>`;
+    html += `
+      <div class="doc-meta"><div>
+        <h2>AUCTION REPORT — ${esc(r.auction.title)}</h2>
+        <p class="sub">${fmtDate(r.auction.date)}${r.auction.location ? ' · ' + esc(r.auction.location) : ''} · printed ${new Date().toLocaleDateString()}</p>
+      </div></div>
+      <h3>Results</h3>
+      <table>
+        ${row('Lots cataloged', r.lotCount)}${row('Sold', r.soldCount)}${row('Passed', r.passedCount)}${row('Still open', r.openCount)}
+        ${row('Sell-through', r.sellThroughPct + '%')}${row('Registered bidders', r.registeredBidders)}${row('Winning buyers', r.buyersWhoWon)}
+      </table>
+      <h3>Money</h3>
+      <table>
+        ${row('Gross hammer', money(r.grossHammer))}
+        ${row("Buyer's premium collected", money(r.premiumCollected))}
+        ${row('Sales tax collected', money(r.taxCollected))}
+        ${row('Invoiced', money(r.invoicedTotal))}${row('Collected', money(r.collectedTotal))}${row('Outstanding', money(r.outstandingTotal))}
+        ${row('Commission earned', money(r.commissionEarned))}${row('Owed to consignors', money(r.owedToConsignors))}
+      </table>
+      ${r.byConsignor.length ? `<h3>By consignor</h3><table><tr><th></th><th class="num">Lots</th><th class="num">Gross</th></tr>
+        ${r.byConsignor.map((g) => `<tr><td>${esc(g.label)}</td><td class="num">${g.count}</td><td class="num">${money(g.gross)}</td></tr>`).join('')}</table>` : ''}
+      ${r.byCategory.length ? `<h3>By category</h3><table><tr><th></th><th class="num">Lots</th><th class="num">Gross</th></tr>
+        ${r.byCategory.map((g) => `<tr><td>${esc(g.label)}</td><td class="num">${g.count}</td><td class="num">${money(g.gross)}</td></tr>`).join('')}</table>` : ''}
+      ${r.topLots.length ? `<h3>Top lots</h3><table><tr><th>Lot</th><th></th><th class="num">Amount</th></tr>
+        ${r.topLots.map((t) => `<tr><td>${t.lotNumber}</td><td>${esc(t.title)}</td><td class="num">${money(t.amount)}</td></tr>`).join('')}</table>` : ''}`;
+  }
+
+  else if (type === 'bidder') {
+    const bidder = B[q.get('id')];
+    if (!bidder) throw new Error('Bidder not found');
+    const invoices = (await api('/api/invoices')).filter((i) => i.bidderId === bidder.id && i.status !== 'void');
+    const regIds = new Set(registrations.filter((r) => r.bidderId === bidder.id).map((r) => r.id));
+    const wins = lots.filter((l) => l.status === 'sold' && regIds.has(l.winningRegId));
+    const hammer = wins.reduce((s, l) => s + Math.round(l.hammerPrice * l.quantity * 100) / 100, 0);
+    const invoiced = invoices.reduce((s, i) => s + i.total, 0);
+    const paid = invoices.reduce((s, i) => s + i.amountPaid, 0);
+    document.title = `Account — ${bidder.name}`;
+    html += `
+      <div class="doc-meta">
+        <div>
+          <h2>ACCOUNT STATEMENT</h2>
+          <p class="sub">Printed ${new Date().toLocaleDateString()}</p>
+        </div>
+        <div>
+          <strong>${esc(bidder.name)}</strong> ${bidder.taxExempt ? '<span class="badge">TAX EXEMPT</span>' : ''}
+          <p class="sub">${esc([bidder.address, bidder.phone, bidder.email].filter(Boolean).join('\n'))}</p>
+        </div>
+      </div>
+      <h3>Invoices</h3>
+      ${invoices.length ? `<table>
+        <tr><th>Invoice</th><th>Auction</th><th>Date</th><th class="num">Total</th><th class="num">Paid</th><th class="num">Balance</th></tr>
+        ${invoices.map((i) => `<tr><td>INV-${i.number}</td><td>${esc((A[i.auctionId] || {}).title || '')}</td>
+          <td>${new Date(i.createdAt).toLocaleDateString()}</td><td class="num">${money(i.total)}</td>
+          <td class="num">${money(i.amountPaid)}</td><td class="num">${money(i.total - i.amountPaid)}</td></tr>`).join('')}
+      </table>` : '<p class="sub">No invoices.</p>'}
+      <table class="totals">
+        <tr><td>Lifetime hammer (${wins.length} lots)</td><td class="num">${money(hammer)}</td></tr>
+        <tr><td>Total invoiced</td><td class="num">${money(invoiced)}</td></tr>
+        <tr><td>Total paid</td><td class="num">${money(paid)}</td></tr>
+        <tr class="grand"><td>Balance due</td><td class="num">${money(invoiced - paid)}</td></tr>
+      </table>
+      <h3>Purchase history</h3>
+      ${wins.length ? `<table>
+        <tr><th>Auction</th><th>Lot</th><th>Item</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Amount</th></tr>
+        ${wins.map((l) => `<tr><td>${esc((A[l.auctionId] || {}).title || '')}</td><td>${l.lotNumber}</td>
+          <td>${esc(l.title)}</td><td class="num">${l.quantity}</td><td class="num">${money(l.hammerPrice)}</td>
+          <td class="num">${money(Math.round(l.hammerPrice * l.quantity * 100) / 100)}</td></tr>`).join('')}
+      </table>` : '<p class="sub">No purchases.</p>'}
+      <div class="footer">${esc(s.invoiceFooter)}</div>`;
+  }
+
+  else if (type === 'regform') {
+    const auction = A[q.get('auctionId')] || {};
+    document.title = `Bidder registration — ${s.businessName}`;
+    const line = (l) => `<h3>${l}</h3><div class="fill-line"></div>`;
+    html += `
+      <div class="doc-meta"><div>
+        <h2>BIDDER REGISTRATION</h2>
+        <p class="sub">${esc(auction.title || '')}${auction.date ? ' · ' + fmtDate(auction.date) : ''}</p>
+      </div><div><h2>PADDLE # ______</h2></div></div>
+      ${line('Full name')}${line('Phone')}${line('Email')}${line('Address')}
+      ${line("Driver's license / ID #")}
+      <h3>Tax exempt? ☐ No ☐ Yes — exemption / resale certificate #</h3><div class="fill-line"></div>
+      <div class="footer">${esc(s.invoiceFooter)} By signing below I agree to the terms of sale and to pay the buyer's premium of ${esc(String(auction.premiumPct ?? s.buyersPremiumPct))}% on all purchases.</div>
+      <div class="sig"><div>Bidder signature</div><div>Date</div></div>`;
+  }
+
+  else if (type === 'clerksheet') {
+    const auction = A[q.get('auctionId')] || {};
+    const auctionLots = lots.filter((l) => l.auctionId === q.get('auctionId')).sort((a, b) => a.lotNumber - b.lotNumber);
+    document.title = `Clerk sheet — ${esc(auction.title || '')}`;
+    html += `
+      <div class="doc-meta"><div>
+        <h2>CLERK SHEET — ${esc(auction.title || '')}</h2>
+        <p class="sub">${fmtDate(auction.date)} · Ring: ________ Clerk: ________</p>
+      </div></div>
+      <table>
+        <tr><th>Lot</th><th>Description</th><th class="num">Qty</th><th>Consignor</th><th style="width:90px">Paddle</th><th style="width:110px">Price</th></tr>
+        ${auctionLots.map((l) => {
+          const c = C[l.consignorId];
+          return `<tr><td>${l.lotNumber}</td><td>${esc(l.title)}</td><td class="num">${l.quantity > 1 ? l.quantity : ''}</td>
+            <td>${c ? esc(c.code) : ''}</td>
+            <td>${l.status === 'sold' ? '#' + (R[l.winningRegId] ? R[l.winningRegId].paddle : '') : ''}</td>
+            <td>${l.status === 'sold' ? money(l.hammerPrice) : l.status === 'passed' ? 'PASS' : ''}</td></tr>`;
+        }).join('')}
+      </table>`;
+  }
+
+  else throw new Error('Unknown document type');
+
+  document.getElementById('doc').innerHTML = html;
+  const img = document.querySelector('.head img');
+  const doPrint = () => setTimeout(() => window.print(), 150);
+  if (img && !img.complete) img.onload = doPrint; else doPrint();
+}
+
+render().catch((err) => {
+  document.getElementById('doc').innerHTML = `<p class="error">${esc(err.message)}${err.message === 'Login required' ? ' — unlock the main window first, then print again.' : ''}</p>`;
+});
+</script>
+</body>
+</html>

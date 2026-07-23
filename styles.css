@@ -233,3 +233,165 @@ details.bids summary { cursor: pointer; font-size: 13px; color: var(--accent); }
 }
 
 .invoice-lines { margin: 6px 0 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+
+h4 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+
+.badge.partial { background: #f3ead9; color: var(--amber); }
+.badge.owed { background: #f3ead9; color: var(--amber); }
+.badge.exempt { background: #e2ecf5; color: #2d5f8a; }
+.badge.qty { background: #e2ecf5; color: #2d5f8a; }
+
+label.check {
+  display: flex !important;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+label.check input { width: auto; }
+
+input[type="search"] { min-width: 180px; }
+
+/* clerk screen */
+.clerk-progress {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  font-size: 15px;
+  color: var(--muted);
+}
+.clerk-card { border-top: 4px solid var(--accent); }
+.clerk-lotnum { font-size: 14px; font-weight: 700; letter-spacing: 0.12em; color: var(--accent); }
+.clerk-title { font-size: 28px; font-weight: 700; margin: 4px 0 6px; }
+.clerk-meta { display: flex; gap: 18px; flex-wrap: wrap; font-size: 14px; color: var(--muted); margin-bottom: 16px; }
+.clerk-meta .highbid { color: var(--green); font-weight: 600; }
+.clerk-form {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.clerk-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.clerk-form input { font-size: 24px; width: 150px; padding: 10px 12px; }
+button.big { font-size: 20px; padding: 12px 26px; }
+.bid-row.pay { color: var(--green); }
+
+/* login */
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.login-overlay .panel { width: min(340px, 90vw); }
+.login-overlay input[name="pin"] { font-size: 22px; text-align: center; letter-spacing: 0.3em; }
+#login-error { color: var(--red); text-align: center; }
+
+/* global search */
+.global-search { position: relative; flex: 1; max-width: 340px; min-width: 200px; }
+.global-search input { width: 100%; }
+.search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(30, 10, 10, 0.18);
+  max-height: 420px;
+  overflow-y: auto;
+  z-index: 60;
+}
+.search-group {
+  padding: 8px 12px 3px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.search-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 0;
+  padding: 7px 12px;
+  background: none;
+  font-size: 14px;
+}
+.search-item:hover { background: var(--bg); }
+.search-item .sub { font-size: 12px; }
+
+/* inline entity links */
+button.link {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  color: var(--accent-dark);
+  text-decoration: underline;
+  text-decoration-color: rgba(195, 31, 38, 0.35);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+button.link:hover { color: var(--accent); }
+
+/* detail dialog */
+#detail {
+  width: min(780px, 95vw);
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.detail-head h3 {
+  font-size: 20px;
+  color: var(--ink);
+  text-transform: none;
+  letter-spacing: 0;
+  margin: 0;
+}
+#detail h4 { margin: 18px 0 6px; }
+#detail table { font-size: 13px; }
+.kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 6px 18px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+.kv .label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.detail-stats { margin-bottom: 4px; }
+.detail-stats .stat { padding: 10px 12px; }
+.detail-stats .value { font-size: 20px; }
+
+/* audit log */
+.audit { max-height: 420px; overflow-y: auto; font-size: 13px; }
+.audit-row { padding: 5px 0; border-bottom: 1px solid var(--line); }
+.audit-row .sub { margin-right: 8px; white-space: nowrap; }

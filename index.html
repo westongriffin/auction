@@ -13,12 +13,20 @@
     <img src="logo-small.png" alt="Brinkley Auctions Inc." class="logo">
     <h1>Brinkley <span>Auctions</span></h1>
   </div>
+  <div class="global-search">
+    <input id="global-search" type="search" placeholder="Search paddles, lots, buyers, invoices…" autocomplete="off">
+    <div id="search-results" class="search-results hidden"></div>
+  </div>
   <nav id="nav">
     <button data-view="dashboard" class="active">Dashboard</button>
     <button data-view="auctions">Auctions</button>
     <button data-view="lots">Lots</button>
+    <button data-view="checkin">Check-in</button>
+    <button data-view="clerk">Clerk</button>
+    <button data-view="cashier">Cashier</button>
+    <button data-view="consignors">Consignors</button>
     <button data-view="bidders">Bidders</button>
-    <button data-view="invoices">Invoices</button>
+    <button data-view="reports">Reports</button>
     <button data-view="settings">Settings</button>
   </nav>
 </header>
@@ -34,8 +42,8 @@
         <div id="dash-auctions"></div>
       </div>
       <div class="panel">
-        <h3>Unpaid invoices</h3>
-        <div id="dash-unpaid"></div>
+        <h3>Money on the table</h3>
+        <div id="dash-money"></div>
       </div>
     </div>
   </section>
@@ -54,6 +62,7 @@
     <div class="view-head">
       <h2>Lots</h2>
       <div class="head-controls">
+        <input type="search" id="lot-search" placeholder="Search lots…">
         <select id="lot-filter-auction"></select>
         <select id="lot-filter-status">
           <option value="">All statuses</option>
@@ -67,38 +76,146 @@
     <div id="lots-table"></div>
   </section>
 
+  <!-- Check-in -->
+  <section id="view-checkin" class="view hidden">
+    <div class="view-head">
+      <h2>Bidder check-in</h2>
+      <div class="head-controls">
+        <select id="checkin-auction"></select>
+        <button id="btn-print-regform">Print blank registration form</button>
+      </div>
+    </div>
+    <div class="two-col">
+      <div class="panel">
+        <h3>Register a bidder</h3>
+        <form id="checkin-form" class="form-grid">
+          <label>Existing bidder
+            <select id="checkin-bidder"><option value="">— New bidder —</option></select>
+          </label>
+          <div id="checkin-new-fields">
+            <label>Full name <input name="name"></label>
+            <label>Phone <input name="phone"></label>
+            <label>Email <input name="email" type="email"></label>
+            <label>ID # (driver's license etc.) <input name="idNumber"></label>
+          </div>
+          <label>Paddle # (blank = next available) <input name="paddle" type="number" min="1"></label>
+          <label class="check"><input type="checkbox" name="taxExempt"> Tax exempt (resale / farm exemption on file)</label>
+          <div><button class="primary" type="submit">Assign paddle</button></div>
+        </form>
+      </div>
+      <div class="panel">
+        <h3>Registered for this auction</h3>
+        <div id="checkin-table"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Clerk -->
+  <section id="view-clerk" class="view hidden">
+    <div class="view-head">
+      <h2>Clerk</h2>
+      <div class="head-controls">
+        <select id="clerk-auction"></select>
+        <button id="btn-print-clerksheet">Print clerk sheet</button>
+      </div>
+    </div>
+    <div id="clerk-area"></div>
+  </section>
+
+  <!-- Cashier -->
+  <section id="view-cashier" class="view hidden">
+    <div class="view-head">
+      <h2>Cashier</h2>
+      <div class="head-controls">
+        <select id="invoice-gen-auction"></select>
+        <button class="primary" id="btn-generate-invoices">Generate invoices</button>
+      </div>
+    </div>
+    <div id="invoices-table"></div>
+    <div class="view-head" style="margin-top:28px">
+      <h2>Consignor settlements</h2>
+      <button class="primary" id="btn-generate-settlements">Generate settlements</button>
+    </div>
+    <div id="settlements-table"></div>
+  </section>
+
+  <!-- Consignors -->
+  <section id="view-consignors" class="view hidden">
+    <div class="view-head">
+      <h2>Consignors</h2>
+      <button class="primary" id="btn-new-consignor">+ New consignor</button>
+    </div>
+    <div id="consignors-table"></div>
+  </section>
+
   <!-- Bidders -->
   <section id="view-bidders" class="view hidden">
     <div class="view-head">
-      <h2>Bidders</h2>
-      <button class="primary" id="btn-new-bidder">+ Register bidder</button>
+      <h2>Customer file</h2>
+      <div class="head-controls">
+        <input type="search" id="bidder-search" placeholder="Search bidders…">
+        <button class="primary" id="btn-new-bidder">+ Add bidder</button>
+      </div>
     </div>
     <div id="bidders-table"></div>
   </section>
 
-  <!-- Invoices -->
-  <section id="view-invoices" class="view hidden">
+  <!-- Reports -->
+  <section id="view-reports" class="view hidden">
     <div class="view-head">
-      <h2>Invoices</h2>
+      <h2>Reports</h2>
       <div class="head-controls">
-        <select id="invoice-gen-auction"></select>
-        <button class="primary" id="btn-generate-invoices">Generate for auction</button>
+        <select id="report-auction"></select>
+        <button id="btn-print-report">Print report</button>
       </div>
     </div>
-    <div id="invoices-table"></div>
+    <div id="report-area"></div>
+    <div class="panel" style="margin-top:14px">
+      <h3>Export CSV (for Excel / accounting)</h3>
+      <div class="head-controls">
+        <button data-csv="lots">Lots</button>
+        <button data-csv="invoices">Invoices</button>
+        <button data-csv="settlements">Settlements</button>
+      </div>
+    </div>
   </section>
 
   <!-- Settings -->
   <section id="view-settings" class="view hidden">
     <h2>Settings</h2>
-    <form id="settings-form" class="panel form-grid">
-      <label>Business name <input name="businessName" required></label>
-      <label>Buyer's premium (%) <input name="buyersPremiumPct" type="number" min="0" step="0.1"></label>
-      <label>Sales tax (%) <input name="taxPct" type="number" min="0" step="0.01"></label>
-      <div><button class="primary" type="submit">Save settings</button></div>
-    </form>
+    <div class="two-col">
+      <form id="settings-form" class="panel form-grid">
+        <h3>Business</h3>
+        <label>Business name <input name="businessName" required></label>
+        <label>Address (shown on printed documents) <textarea name="address" rows="2"></textarea></label>
+        <label>Phone <input name="phone"></label>
+        <label>Default buyer's premium (%) <input name="buyersPremiumPct" type="number" min="0" step="0.1"></label>
+        <label>Default sales tax (%) <input name="taxPct" type="number" min="0" step="0.01"></label>
+        <label>Default seller commission (%) <input name="defaultCommissionPct" type="number" min="0" step="0.1"></label>
+        <label>Invoice footer / terms <textarea name="invoiceFooter" rows="2"></textarea></label>
+        <div><button class="primary" type="submit">Save settings</button></div>
+      </form>
+      <div>
+        <form id="pin-form" class="panel form-grid">
+          <h3>Security</h3>
+          <p class="sub" id="pin-status"></p>
+          <label>New PIN (leave blank to disable login) <input name="newPin" type="password" autocomplete="new-password"></label>
+          <div><button class="primary" type="submit">Update PIN</button></div>
+          <p class="sub">The system only accepts connections from this computer. Daily backups are kept in <code>data/backups/</code> (last 30 days).</p>
+        </form>
+        <div class="panel" style="margin-top:14px">
+          <h3>Activity log</h3>
+          <div id="audit-table" class="audit"></div>
+        </div>
+      </div>
+    </div>
   </section>
 </main>
+
+<dialog id="detail">
+  <div id="detail-body"></div>
+  <div class="modal-actions"><button id="detail-close" type="button">Close</button></div>
+</dialog>
 
 <dialog id="modal">
   <form id="modal-form" method="dialog">
@@ -110,6 +227,16 @@
     </div>
   </form>
 </dialog>
+
+<div id="login-overlay" class="login-overlay hidden">
+  <form id="login-form" class="panel form-grid">
+    <img src="logo-small.png" alt="" style="max-width:220px;margin:0 auto">
+    <h3 style="text-align:center">Enter PIN</h3>
+    <label><input name="pin" type="password" inputmode="numeric" autocomplete="current-password" autofocus></label>
+    <div><button class="primary" type="submit" style="width:100%">Unlock</button></div>
+    <p class="sub" id="login-error"></p>
+  </form>
+</div>
 
 <div id="toast" class="toast hidden"></div>
 <script src="app.js"></script>
