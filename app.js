@@ -119,6 +119,15 @@ async function enterPortal(code, who) {
   document.querySelectorAll('.view').forEach((v) => v.classList.add('hidden'));
   $('#view-portal').classList.remove('hidden');
   await renderPortal();
+  // Keep sale-day pages fresh: refresh every 30s while visible and idle.
+  clearInterval(enterPortal.timer);
+  enterPortal.timer = setInterval(() => {
+    if (document.visibilityState === 'visible' && portalUser &&
+        !document.querySelector('dialog[open]') &&
+        !($('#portal-cat-search') && $('#portal-cat-search').value)) {
+      renderPortal().catch(() => { /* transient network blip — next tick retries */ });
+    }
+  }, 30000);
 }
 
 $('#gate-form').addEventListener('submit', async (e) => {
@@ -517,6 +526,60 @@ function openConsignorDetail(id) {
   $('#detail').showModal();
 }
 
+// ---------- lot photos (staff) ----------
+
+async function downscaleImage(file, maxDim = 1200, quality = 0.8) {
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = URL.createObjectURL(file);
+  });
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(img.width * scale));
+  canvas.height = Math.max(1, Math.round(img.height * scale));
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  URL.revokeObjectURL(img.src);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+function managePhotos(id) {
+  const lot = lotById(id);
+  if (!lot) return;
+  $('#detail-body').innerHTML = `
+    <div class="detail-head"><div>
+      <h3>Photos — lot ${lot.lotNumber}, ${esc(lot.title)}</h3>
+      <p class="sub">Photos show in the customer portal catalog. They're resized automatically before upload.</p>
+    </div></div>
+    <div class="photo-grid">
+      ${(lot.photos || []).map((p) => `
+        <figure class="photo-thumb">
+          <img src="/photos/${esc(p)}" alt="" loading="lazy">
+          <button class="small danger" data-act="del-photo" data-id="${lot.id}" data-name="${esc(p)}">Remove</button>
+        </figure>`).join('') || '<p class="sub">No photos yet.</p>'}
+    </div>
+    <label class="photo-add">
+      <input type="file" id="photo-file" accept="image/*" multiple>
+    </label>`;
+  $('#detail').showModal();
+  $('#photo-file').addEventListener('change', async (e) => {
+    const files = [...e.target.files];
+    if (!files.length) return;
+    try {
+      for (const f of files) {
+        const dataUrl = await downscaleImage(f);
+        await api('POST', `/api/lots/${id}/photos`, { data: dataUrl });
+      }
+      await loadAll();
+      toast(`${files.length} photo${files.length === 1 ? '' : 's'} added`);
+      managePhotos(id);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
 function portalSection(kind, person) {
   return `
     <h4>Portal access</h4>
@@ -670,7 +733,8 @@ function auctionFields(a = {}) {
       options: ['upcoming', 'live', 'closed'].map((s) => ({ value: s, label: s })) },
     { name: 'premiumPct', label: `Buyer's premium % (blank = default ${state.settings.buyersPremiumPct}%)`, type: 'number', step: '0.1', min: 0, value: a.premiumPct ?? '' },
     { name: 'taxPct', label: `Sales tax % (blank = default ${state.settings.taxPct}%)`, type: 'number', step: '0.01', min: 0, value: a.taxPct ?? '' },
-    { name: 'notes', label: 'Notes', type: 'textarea', value: a.notes },
+    { name: 'publicNotes', label: 'Public notes for buyers (pickup day, load-out, viewing…)', type: 'textarea', value: a.publicNotes },
+    { name: 'notes', label: 'Internal notes (office only)', type: 'textarea', value: a.notes },
   ];
 }
 
@@ -773,6 +837,7 @@ function renderLots() {
           ${l.status === 'open' ? `<button class="small" data-act="sell-lot" data-id="${l.id}">Sell</button>
             <button class="small" data-act="pass-lot" data-id="${l.id}">Pass</button>` : ''}
           ${l.status !== 'open' && !l.invoiceId && !l.settlementId ? `<button class="small" data-act="reopen" data-id="${l.id}">Reopen</button>` : ''}
+          <button class="small" data-act="lot-photos" data-id="${l.id}">📷${l.photos && l.photos.length ? ' ' + l.photos.length : ''}</button>
           <button class="small" data-act="edit-lot" data-id="${l.id}">Edit</button>
           <button class="small danger" data-act="del-lot" data-id="${l.id}">Delete</button>
         </td>
@@ -1264,7 +1329,7 @@ document.querySelectorAll('button[data-csv]').forEach((btn) =>
 
 async function renderSettings() {
   const f = $('#settings-form');
-  for (const k of ['businessName', 'address', 'phone', 'buyersPremiumPct', 'taxPct', 'defaultCommissionPct', 'invoiceFooter']) {
+  for (const k of ['businessName', 'address', 'phone', 'buyersPremiumPct', 'taxPct', 'defaultCommissionPct', 'invoiceFooter', 'settlementNote']) {
     f.elements[k].value = state.settings[k] ?? '';
   }
   $('#pin-status').textContent = state.settings.pinSet
@@ -1290,6 +1355,7 @@ $('#settings-form').addEventListener('submit', (e) => {
     taxPct: f.taxPct.value,
     defaultCommissionPct: f.defaultCommissionPct.value,
     invoiceFooter: f.invoiceFooter.value,
+    settlementNote: f.settlementNote.value,
   }), 'Settings saved');
 });
 
@@ -1435,11 +1501,13 @@ document.addEventListener('click', (e) => {
 
   if (act === 'portal-bid') {
     const myBid = btn.dataset.my;
+    const prem = Number(btn.dataset.prem) || 0;
+    const qty = Number(btn.dataset.qty) || 1;
     openModal({
       title: btn.dataset.title,
       submitLabel: 'Place bid',
       fields: [
-        { name: 'amount', label: `Your maximum bid ($)${myBid ? ` — your current bid is ${money(myBid)}` : ''}`,
+        { name: 'amount', label: `Your maximum bid ($${qty > 1 ? ' each' : ''})${myBid ? ` — your current bid is ${money(myBid)}` : ''}`,
           type: 'number', step: '0.01', min: 0, required: true },
       ],
       onSubmit: async (v) => {
@@ -1452,7 +1520,37 @@ document.addEventListener('click', (e) => {
         }
       },
     });
+    // Live "what winning would cost" estimate under the amount field.
+    const est = document.createElement('p');
+    est.className = 'sub';
+    est.style.margin = '0';
+    $('#modal-fields').appendChild(est);
+    const amountEl = $('#modal-form').elements.amount;
+    const updateEst = () => {
+      const a = Number(amountEl.value) || 0;
+      est.textContent = a > 0
+        ? `If you win at this bid: ${money(a * qty)}${qty > 1 ? ` (${money(a)} × ${qty})` : ''} + ${prem}% buyer's premium = ${money(a * qty * (1 + prem / 100))}, plus any applicable sales tax.`
+        : `A ${prem}% buyer's premium and any applicable sales tax are added to winning bids.`;
+    };
+    amountEl.addEventListener('input', updateEst);
+    updateEst();
     return;
+  }
+  if (act === 'pp-invoice' && portalData) {
+    const i = portalData.me.invoices[Number(btn.dataset.idx)];
+    if (i) portalPrint(`Invoice INV-${i.number}`, portalInvoiceDoc(i, portalData.me));
+    return;
+  }
+  if (act === 'pp-settlement' && portalData) {
+    const s = portalData.me.settlements[Number(btn.dataset.idx)];
+    if (s) portalPrint(`Settlement ST-${s.number}`, portalSettlementDoc(s, portalData.me));
+    return;
+  }
+
+  if (act === 'lot-photos') managePhotos(id);
+  if (act === 'del-photo') {
+    run(() => api('DELETE', `/api/lots/${id}/photos/${encodeURIComponent(btn.dataset.name)}`), 'Photo removed')
+      .then(() => managePhotos(id));
   }
 
   if (act === 'view-bidder') openBidderDetail(id);
@@ -1599,15 +1697,32 @@ async function renderPortal() {
   else await renderPortalConsignor();
 }
 
+let portalData = null; // last-loaded portal payloads (for printing)
+
+function portalOfficeBlock(office) {
+  if (!office) return '';
+  const tel = office.phone ? office.phone.replace(/[^+\d]/g, '') : '';
+  return `<div class="panel office-block" style="margin-top:24px">
+    <h3>The auction office</h3>
+    <p><strong>${esc(office.name)}</strong>${office.phone ? ` · <a href="tel:${esc(tel)}">${esc(office.phone)}</a>` : ''}</p>
+    ${office.address ? `<p class="sub">${esc(office.address)}</p>` : ''}
+    ${office.terms ? `<p class="sub" style="margin-top:8px"><strong>Terms of sale:</strong> ${esc(office.terms)}</p>` : ''}
+  </div>`;
+}
+
+const officePhoneLink = (office) => office && office.phone
+  ? `<a href="tel:${esc(office.phone.replace(/[^+\d]/g, ''))}">${esc(office.phone)}</a>` : 'the office';
+
 async function renderPortalBidder() {
   const [me, cat] = await Promise.all([
     api('GET', `/api/portal/bidder?code=${encodeURIComponent(portalUser.code)}`),
     api('GET', `/api/portal/catalog?code=${encodeURIComponent(portalUser.code)}`),
   ]);
+  portalData = { me, cat };
   $('#view-portal').innerHTML = `
     <div class="greeting">
       <h2>Welcome back, ${esc(me.name.split(' ')[0])}</h2>
-      <p class="sub">${me.taxExempt ? 'Tax-exempt buyer · ' : ''}This is your account with Brinkley Auctions.</p>
+      <p class="sub">${me.taxExempt ? 'Tax-exempt buyer · ' : ''}This is your account with ${esc(me.office.name)}.</p>
     </div>
     ${portalTiles([
       ['Balance due', money(me.balanceDue), me.balanceDue > 0 ? 'warn' : 'good'],
@@ -1616,18 +1731,22 @@ async function renderPortalBidder() {
       ['My absentee bids', me.absenteeBids.length],
     ])}
     ${me.balanceDue > 0 ? `<div class="panel" style="margin-bottom:14px"><h3>Please settle up</h3>
-      <p class="sub">You have an outstanding balance of <strong>${money(me.balanceDue)}</strong>. Please contact the office or stop by to pay.</p></div>` : ''}
+      <p class="sub">You have an outstanding balance of <strong>${money(me.balanceDue)}</strong>.
+      Call ${officePhoneLink(me.office)} or stop by${me.office.address ? ` at ${esc(me.office.address)}` : ''} to pay.</p></div>` : ''}
     <h3 style="margin-top:20px">Upcoming auctions — browse &amp; bid</h3>
-    ${renderPortalCatalog(cat)}
+    <input type="search" id="portal-cat-search" placeholder="Search the catalogs — item, category, lot #…" style="width:100%;margin-bottom:10px">
+    <div id="portal-catalog">${renderPortalCatalog(cat, '')}</div>
     <h3 style="margin-top:20px">My invoices</h3>
-    ${me.invoices.length ? me.invoices.map((i) => `
+    ${me.invoices.length ? me.invoices.map((i, idx) => `
       <div class="panel" style="margin-bottom:10px">
         <div class="lot-card" style="border:none;padding:0 0 6px">
           <div class="lot-main"><strong>INV-${i.number}</strong> — ${esc(i.auction.title)}
             <div class="sub">${new Date(i.createdAt).toLocaleDateString()}</div></div>
           <div class="lot-side">${badge(i.status)}<div><strong>${money(i.total)}</strong></div>
-            ${i.balance > 0 ? `<div class="sub">balance ${money(i.balance)}</div>` : ''}</div>
+            ${i.balance > 0 ? `<div class="sub">balance ${money(i.balance)}</div>` : ''}
+            <div style="margin-top:4px"><button class="small" data-act="pp-invoice" data-idx="${idx}">Print / save</button></div></div>
         </div>
+        ${i.auction.publicNotes ? `<p class="sub">📍 <strong>Pickup &amp; removal:</strong> ${esc(i.auction.publicNotes)}</p>` : ''}
         <details class="bids"><summary>${i.lineItems.length} lot${i.lineItems.length === 1 ? '' : 's'} · details</summary>
           ${i.lineItems.map((li) => `<div class="bid-row"><span>Lot ${li.lotNumber} — ${esc(li.title)}${li.quantity > 1 ? ` × ${li.quantity}` : ''}</span><span>${money(li.amount)}</span></div>`).join('')}
           <div class="bid-row"><span>Buyer's premium (${i.premiumPct}%)</span><span>${money(i.premium)}</span></div>
@@ -1638,7 +1757,11 @@ async function renderPortalBidder() {
     <h3 style="margin-top:20px">My absentee bids</h3>
     ${me.absenteeBids.length ? `<div class="panel">${me.absenteeBids.map((b) => `
       <div class="lot-card">
-        <div class="lot-main">Lot ${b.lotNumber} — ${esc(b.title)}<div class="sub">${esc(b.auction.title)}</div></div>
+        <div class="lot-main">Lot ${b.lotNumber} — ${esc(b.title)}<div class="sub">${esc(b.auction.title)}</div>
+          ${b.lotStatus === 'open' ? (b.leading
+            ? '<div class="mybid">✓ You\'re the high absentee bid</div>'
+            : '<div class="outbid">You\'ve been outbid — raise it in the catalog above</div>') : ''}
+        </div>
         <div class="lot-side">${money(b.amount)}
           <div>${b.lotStatus === 'open' ? badge('open') : b.won ? badge('sold') + ' <span class="mybid">you won!</span>' : badge(b.lotStatus)}</div>
         </div>
@@ -1648,36 +1771,54 @@ async function renderPortalBidder() {
       <div class="lot-card">
         <div class="lot-main">Lot ${p.lotNumber} — ${esc(p.title)}${p.quantity > 1 ? ` × ${p.quantity}` : ''}<div class="sub">${esc(p.auction.title)}</div></div>
         <div class="lot-side"><strong>${money(p.amount)}</strong></div>
-      </div>`).join('')}</div>` : '<p class="sub">No purchases yet.</p>'}`;
+      </div>`).join('')}</div>` : '<p class="sub">No purchases yet.</p>'}
+    ${portalOfficeBlock(me.office)}`;
+  const search = $('#portal-cat-search');
+  search.addEventListener('input', () => {
+    $('#portal-catalog').innerHTML = renderPortalCatalog(portalData.cat, search.value);
+  });
 }
 
-function renderPortalCatalog(cat) {
+function renderPortalCatalog(cat, query) {
   if (!cat.auctions.length) return '<p class="sub">No upcoming auctions right now — check back soon.</p>';
-  return cat.auctions.map((a) => {
-    const open = a.lots.filter((l) => l.status === 'open');
-    return `<details class="auction-cat" ${a.status === 'live' ? 'open' : ''}>
+  const q = (query || '').trim().toLowerCase();
+  const matches = (l) => !q ||
+    q.split(/\s+/).every((w) => `${l.lotNumber} ${l.title} ${l.description} ${l.category}`.toLowerCase().includes(w));
+  const html = cat.auctions.map((a) => {
+    const open = a.lots.filter((l) => l.status === 'open' && matches(l));
+    if (q && !open.length) return '';
+    return `<details class="auction-cat" ${a.status === 'live' || q ? 'open' : ''}>
       <summary>${esc(a.title)} ${badge(a.status)} <span class="sub">${fmtDate(a.date)}${a.location ? ' · ' + esc(a.location) : ''} · ${open.length} lot${open.length === 1 ? '' : 's'} open · ${a.premiumPct}% buyer's premium</span></summary>
-      <div>${open.length ? open.map((l) => `
+      <div>
+      ${a.publicNotes ? `<p class="sub" style="padding:8px 0">📍 ${esc(a.publicNotes)}</p>` : ''}
+      ${open.length ? open.map((l) => `
         <div class="lot-card">
           <div class="lot-main">
             <strong>Lot ${l.lotNumber} — ${esc(l.title)}</strong>${l.quantity > 1 ? ` <span class="badge qty">× ${l.quantity} — bid is per item</span>` : ''}
+            ${l.photos && l.photos.length ? `<div class="lot-photos">${l.photos.map((p) =>
+              `<a href="/photos/${esc(p)}" target="_blank" rel="noopener"><img src="/photos/${esc(p)}" loading="lazy" alt="Lot ${l.lotNumber} photo"></a>`).join('')}</div>` : ''}
             ${l.description ? `<div class="sub">${esc(l.description)}</div>` : ''}
             <div class="sub">${esc(l.category)}${l.absenteeCount ? ` · ${l.absenteeCount} absentee bid${l.absenteeCount === 1 ? '' : 's'} in` : ''}</div>
-            ${l.myBid ? `<div class="mybid">Your bid: ${money(l.myBid)}</div>` : ''}
+            ${l.myBid ? (l.myBidLeading
+              ? `<div class="mybid">✓ Your bid of ${money(l.myBid)} is the high absentee bid</div>`
+              : `<div class="outbid">Your bid of ${money(l.myBid)} has been outbid</div>`) : ''}
           </div>
           <div class="lot-side">
             <div class="sub">Starts at</div><strong>${money(l.startingBid)}</strong>
             ${cat.canBid ? `<div style="margin-top:6px"><button class="small primary" data-act="portal-bid" data-id="${l.id}"
-              data-title="Lot ${l.lotNumber} — ${esc(l.title)}" data-my="${l.myBid || ''}">${l.myBid ? 'Raise bid' : 'Absentee bid'}</button></div>` : ''}
+              data-title="Lot ${l.lotNumber} — ${esc(l.title)}" data-my="${l.myBid || ''}" data-prem="${a.premiumPct}" data-qty="${l.quantity}">${l.myBid ? 'Raise bid' : 'Absentee bid'}</button></div>` : ''}
           </div>
         </div>`).join('') : '<p class="sub" style="padding:10px 0">All lots in this auction have been hammered.</p>'}
       </div>
     </details>`;
   }).join('');
+  return html || '<p class="sub">Nothing matches that search.</p>';
 }
 
 async function renderPortalConsignor() {
   const me = await api('GET', `/api/portal/consignor?code=${encodeURIComponent(portalUser.code)}`);
+  portalData = { me };
+  const passedCount = me.lotsByAuction.reduce((s, g) => s + g.lots.filter((l) => l.status === 'passed').length, 0);
   $('#view-portal').innerHTML = `
     <div class="greeting">
       <h2>Welcome back, ${esc(me.name)}</h2>
@@ -1690,28 +1831,102 @@ async function renderPortalConsignor() {
       ['Paid to you', money(me.totals.netPaid)],
       ['Owed to you now', money(me.totals.owedNow), me.totals.owedNow > 0 ? 'warn' : ''],
     ])}
+    ${me.totals.owedNow > 0 && me.office.settlementNote ? `<div class="panel" style="margin-bottom:14px"><h3>When you'll be paid</h3>
+      <p class="sub">${esc(me.office.settlementNote)} Questions? Call ${officePhoneLink(me.office)}.</p></div>` : ''}
     <h3 style="margin-top:20px">My settlements</h3>
-    ${me.settlements.length ? me.settlements.map((s) => `
+    ${me.settlements.length ? me.settlements.map((s, idx) => `
       <div class="panel" style="margin-bottom:10px">
         <div class="lot-card" style="border:none;padding:0">
           <div class="lot-main"><strong>ST-${s.number}</strong> — ${esc(s.auction.title)}
-            <div class="sub">${s.status === 'paid' ? `Paid by ${esc(s.method)} on ${new Date(s.paidAt).toLocaleDateString()}` : 'Payment being prepared'}</div></div>
+            <div class="sub">${s.status === 'paid' ? `Paid by ${esc(s.method)} on ${new Date(s.paidAt).toLocaleDateString()}` : esc(me.office.settlementNote || 'Payment being prepared')}</div></div>
           <div class="lot-side">${badge(s.status)}
             <div class="sub">gross ${money(s.grossHammer)} − ${s.commissionPct}%</div>
-            <div><strong>${money(s.netDue)}</strong></div></div>
+            <div><strong>${money(s.netDue)}</strong></div>
+            <div style="margin-top:4px"><button class="small" data-act="pp-settlement" data-idx="${idx}">Print / save</button></div></div>
         </div>
       </div>`).join('') : '<p class="sub">No settlements yet — statements appear here after your items sell.</p>'}
+    ${passedCount ? `<div class="panel" style="margin:14px 0"><h3>Items that didn't sell</h3>
+      <p class="sub">${passedCount} of your item${passedCount === 1 ? '' : 's'} didn't meet the money and ${passedCount === 1 ? 'is' : 'are'} marked <em>passed</em> below.
+      Call ${officePhoneLink(me.office)} about relisting in an upcoming sale or arranging pickup.</p></div>` : ''}
     <h3 style="margin-top:20px">My items</h3>
     ${me.lotsByAuction.length ? me.lotsByAuction.map((g) => `
       <details class="auction-cat" open>
         <summary>${esc(g.auction.title)} ${badge(g.auction.status)} <span class="sub">${fmtDate(g.auction.date)}</span></summary>
         <div>${g.lots.map((l) => `
           <div class="lot-card">
-            <div class="lot-main">Lot ${l.lotNumber} — ${esc(l.title)}${l.quantity > 1 ? ` × ${l.quantity}` : ''}</div>
+            <div class="lot-main">Lot ${l.lotNumber} — ${esc(l.title)}${l.quantity > 1 ? ` × ${l.quantity}` : ''}
+              ${l.photos && l.photos.length ? `<div class="lot-photos">${l.photos.map((p) =>
+                `<a href="/photos/${esc(p)}" target="_blank" rel="noopener"><img src="/photos/${esc(p)}" loading="lazy" alt=""></a>`).join('')}</div>` : ''}
+              ${l.status === 'open' && l.reserve > 0 ? `<div class="sub">Your reserve: ${money(l.reserve)}${l.quantity > 1 ? ' each' : ''}</div>` : ''}
+              ${l.status === 'passed' ? `<div class="sub">No sale — call the office about relisting or pickup.</div>` : ''}
+            </div>
             <div class="lot-side">${badge(l.status)} ${l.amount !== null ? `<strong>${money(l.amount)}</strong>` : ''}</div>
           </div>`).join('')}
         </div>
-      </details>`).join('') : '<p class="sub">No items consigned yet.</p>'}`;
+      </details>`).join('') : '<p class="sub">No items consigned yet.</p>'}
+    ${me.upcomingAuctions.length ? `<div class="panel" style="margin-top:14px"><h3>Consign for an upcoming sale</h3>
+      <p class="sub">${me.upcomingAuctions.map((a) => `<strong>${esc(a.title)}</strong> — ${fmtDate(a.date)}${a.location ? ' at ' + esc(a.location) : ''}`).join(' · ')}.
+      Have more to sell? Call ${officePhoneLink(me.office)} to get your items in the catalog.</p></div>` : ''}
+    ${portalOfficeBlock(me.office)}`;
+}
+
+// ---- portal printing (self-contained window, works from anywhere) ----
+
+function portalPrint(title, body) {
+  const w = window.open('', '_blank');
+  if (!w) return toast('Allow pop-ups to print your document', true);
+  w.document.write(`<!DOCTYPE html><html><head><title>${esc(title)}</title><style>
+    body { font-family: Georgia, 'Times New Roman', serif; color: #111; padding: 32px; max-width: 720px; margin: auto; }
+    .head { display: flex; gap: 16px; align-items: center; border-bottom: 3px solid #c31f26; padding-bottom: 10px; margin-bottom: 16px; }
+    .head img { height: 60px; } .head h1 { font-size: 20px; color: #8e1013; }
+    .head .sub { font-size: 12px; color: #555; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; }
+    td, th { padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: left; font-size: 14px; }
+    th { border-bottom: 2px solid #333; font-size: 11px; text-transform: uppercase; }
+    .num { text-align: right; } .tot td { border-top: 2px solid #333; font-weight: bold; border-bottom: none; }
+    .sub { color: #555; font-size: 12px; } h2 { font-size: 15px; margin: 14px 0 4px; }
+  </style></head><body>
+  <div class="head"><img src="${location.origin}/logo-small.png" alt=""><div><h1>${esc(title)}</h1><div class="sub">${new Date().toLocaleDateString()}</div></div></div>
+  ${body}
+  </body></html>`);
+  w.document.close();
+  setTimeout(() => { try { w.print(); } catch { /* user can print manually */ } }, 500);
+}
+
+function portalInvoiceDoc(i, me) {
+  const o = me.office;
+  return `
+    <p><strong>${esc(o.name)}</strong>${o.phone ? ' · ' + esc(o.phone) : ''}<br><span class="sub">${esc(o.address || '')}</span></p>
+    <h2>Invoice INV-${i.number} — ${esc(i.auction.title)} (${fmtDate(i.auction.date)})</h2>
+    <p class="sub">Buyer: ${esc(me.name)}${i.status === 'paid' ? ' — PAID IN FULL' : ''}</p>
+    <table><tr><th>Lot</th><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Amount</th></tr>
+    ${i.lineItems.map((li) => `<tr><td>${li.lotNumber}</td><td>${esc(li.title)}</td><td class="num">${li.quantity}</td><td class="num">${money(li.hammerPrice)}</td><td class="num">${money(li.amount)}</td></tr>`).join('')}
+    <tr><td colspan="4">Subtotal</td><td class="num">${money(i.subtotal)}</td></tr>
+    <tr><td colspan="4">Buyer's premium (${i.premiumPct}%)</td><td class="num">${money(i.premium)}</td></tr>
+    ${i.tax ? `<tr><td colspan="4">Sales tax (${i.taxPct}%)</td><td class="num">${money(i.tax)}</td></tr>` : ''}
+    <tr class="tot"><td colspan="4">Total</td><td class="num">${money(i.total)}</td></tr>
+    ${i.payments.map((p) => `<tr><td colspan="4">Paid — ${esc(p.method)} ${new Date(p.time).toLocaleDateString()}</td><td class="num">−${money(p.amount)}</td></tr>`).join('')}
+    ${i.payments.length ? `<tr class="tot"><td colspan="4">Balance due</td><td class="num">${money(i.balance)}</td></tr>` : ''}
+    </table>
+    ${i.auction.publicNotes ? `<p class="sub"><strong>Pickup &amp; removal:</strong> ${esc(i.auction.publicNotes)}</p>` : ''}
+    <p class="sub">${esc(o.terms || '')}</p>`;
+}
+
+function portalSettlementDoc(s, me) {
+  const o = me.office;
+  return `
+    <p><strong>${esc(o.name)}</strong>${o.phone ? ' · ' + esc(o.phone) : ''}<br><span class="sub">${esc(o.address || '')}</span></p>
+    <h2>Seller settlement ST-${s.number} — ${esc(s.auction.title)} (${fmtDate(s.auction.date)})</h2>
+    <p class="sub">Seller: ${esc(me.name)} (${esc(me.code)})</p>
+    <table><tr><th>Lot</th><th>Description</th><th class="num">Qty</th><th class="num">Hammer</th><th class="num">Amount</th></tr>
+    ${s.lineItems.map((li) => `<tr><td>${li.lotNumber}</td><td>${esc(li.title)}</td><td class="num">${li.quantity}</td><td class="num">${money(li.hammerPrice)}</td><td class="num">${money(li.amount)}</td></tr>`).join('')}
+    ${(s.passedItems || []).map((li) => `<tr><td>${li.lotNumber}</td><td>${esc(li.title)}</td><td class="num"></td><td class="num">no sale</td><td class="num">—</td></tr>`).join('')}
+    <tr><td colspan="4">Gross hammer</td><td class="num">${money(s.grossHammer)}</td></tr>
+    <tr><td colspan="4">Commission (${s.commissionPct}%)</td><td class="num">−${money(s.commission)}</td></tr>
+    <tr class="tot"><td colspan="4">Net due to seller</td><td class="num">${money(s.netDue)}</td></tr>
+    ${s.status === 'paid' ? `<tr><td colspan="4">Paid by ${esc(s.method)}</td><td class="num">${new Date(s.paidAt).toLocaleDateString()}</td></tr>` : ''}
+    </table>
+    <p class="sub">${esc(o.terms || '')}</p>`;
 }
 
 // ---------- crash reporting ----------

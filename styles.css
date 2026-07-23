@@ -620,6 +620,27 @@ body.portal-mode main { max-width: 880px; }
 .lot-main { flex: 1 1 240px; }
 .lot-side { text-align: right; flex: 0 0 auto; }
 .mybid { color: var(--green); font-weight: 600; font-size: 13px; }
+.outbid { color: var(--amber); font-weight: 600; font-size: 13px; }
+.lot-photos { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.lot-photos img {
+  height: 72px;
+  width: 96px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+.photo-grid { display: flex; gap: 12px; flex-wrap: wrap; margin: 10px 0; }
+.photo-thumb { margin: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.photo-thumb img {
+  height: 110px;
+  width: 150px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+}
+.photo-add { display: block; margin-top: 10px; }
+.office-block a { color: var(--accent-dark); font-weight: 600; }
 details.auction-cat { margin-bottom: 12px; }
 details.auction-cat > summary {
   cursor: pointer;

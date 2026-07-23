@@ -18,6 +18,7 @@
     taxPct: 0,
     defaultCommissionPct: 20,
     invoiceFooter: 'All sales are final. Items sold as-is, where-is.',
+    settlementNote: 'Settlement checks are typically ready within 7 business days of sale day.',
     portalUrl: '',
     pin: '',
     nextInvoiceNumber: 1000,
@@ -34,8 +35,10 @@
     for (const a of d.auctions) {
       if (a.premiumPct === undefined) a.premiumPct = null;
       if (a.taxPct === undefined) a.taxPct = null;
+      if (a.publicNotes === undefined) a.publicNotes = '';
     }
     for (const l of d.lots) {
+      if (!Array.isArray(l.photos)) l.photos = [];
       if (l.quantity === undefined || !(Number(l.quantity) >= 1)) l.quantity = 1;
       if (l.consignorId === undefined) l.consignorId = null;
       if (l.winningRegId === undefined) l.winningRegId = null;
@@ -116,7 +119,7 @@
     });
     route('PUT', '/api/settings', (params, body) => {
       const s = db.settings;
-      for (const k of ['businessName', 'address', 'phone', 'invoiceFooter']) {
+      for (const k of ['businessName', 'address', 'phone', 'invoiceFooter', 'settlementNote']) {
         if (body[k] !== undefined) s[k] = String(body[k]);
       }
       for (const k of ['buyersPremiumPct', 'taxPct', 'defaultCommissionPct']) {
@@ -145,6 +148,7 @@
         premiumPct: body.premiumPct === '' || body.premiumPct === undefined || body.premiumPct === null ? null : num(body.premiumPct),
         taxPct: body.taxPct === '' || body.taxPct === undefined || body.taxPct === null ? null : num(body.taxPct),
         notes: body.notes || '',
+        publicNotes: body.publicNotes || '',
         createdAt: new Date().toISOString(),
       };
       db.auctions.push(auction);
@@ -155,7 +159,7 @@
     route('PUT', '/api/auctions/:id', (params, body) => {
       const auction = findById(db.auctions, params.id);
       if (!auction) return { status: 404, body: { error: 'Auction not found' } };
-      for (const k of ['title', 'date', 'location', 'status', 'notes']) {
+      for (const k of ['title', 'date', 'location', 'status', 'notes', 'publicNotes']) {
         if (body[k] !== undefined) auction[k] = body[k];
       }
       for (const k of ['premiumPct', 'taxPct']) {
@@ -373,6 +377,7 @@
         quantity: Math.max(1, Math.round(num(body.quantity, 1))),
         startingBid: num(body.startingBid),
         reserve: num(body.reserve),
+        photos: [],
         status: 'open',
         hammerPrice: null,
         winningRegId: null,
@@ -686,8 +691,17 @@
     const consignorByCode = (c) => { const code = normCode(c); return code ? db.consignors.find((x) => x.portalCode === code) : null; };
     const auctionRef = (id) => {
       const a = findById(db.auctions, id);
-      return a ? { title: a.title, date: a.date, status: a.status } : { title: '?', date: '', status: '' };
+      return a
+        ? { title: a.title, date: a.date, status: a.status, location: a.location, publicNotes: a.publicNotes || '' }
+        : { title: '?', date: '', status: '', location: '', publicNotes: '' };
     };
+    const officeInfo = () => ({
+      name: db.settings.businessName,
+      address: db.settings.address,
+      phone: db.settings.phone,
+      terms: db.settings.invoiceFooter,
+      settlementNote: db.settings.settlementNote,
+    });
 
     route('POST', '/api/bidders/:id/portal-code', (params) => {
       const b = findById(db.bidders, params.id);
@@ -728,6 +742,7 @@
           email: bd.email,
           phone: bd.phone,
           taxExempt: !!bd.taxExempt,
+          office: officeInfo(),
           balanceDue: round2(invoices.reduce((s, i) => s + (i.total - i.amountPaid), 0)),
           lifetimeHammer: round2(wins.reduce((s, l) => s + lotAmount(l), 0)),
           registrations: regs.map((r) => ({ paddle: r.paddle, taxExempt: r.taxExempt, auction: auctionRef(r.auctionId) })),
@@ -744,11 +759,14 @@
           })),
           absenteeBids: db.bids.filter((x) => x.bidderId === bd.id).map((x) => {
             const l = findById(db.lots, x.lotId);
-            return l ? {
+            if (!l) return null;
+            const high = Math.max(...db.bids.filter((y) => y.lotId === l.id).map((y) => y.amount));
+            return {
               auction: auctionRef(l.auctionId), lotNumber: l.lotNumber, title: l.title,
               amount: x.amount, lotStatus: l.status,
+              leading: l.status === 'open' ? x.amount >= high : undefined,
               won: l.status === 'sold' && regIds.has(l.winningRegId),
-            } : null;
+            };
           }).filter(Boolean),
         },
       };
@@ -765,6 +783,7 @@
         if (!byAuction.has(l.auctionId)) byAuction.set(l.auctionId, { auction: auctionRef(l.auctionId), lots: [] });
         byAuction.get(l.auctionId).lots.push({
           lotNumber: l.lotNumber, title: l.title, quantity: l.quantity, status: l.status,
+          reserve: l.reserve, photos: l.photos || [],
           hammerPrice: l.hammerPrice, amount: l.status === 'sold' ? lotAmount(l) : null,
         });
       }
@@ -774,6 +793,10 @@
         body: {
           name: c.name,
           code: c.code,
+          office: officeInfo(),
+          upcomingAuctions: db.auctions.filter((a) => a.status === 'upcoming')
+            .sort((x, y) => (x.date || '').localeCompare(y.date || ''))
+            .map((a) => ({ title: a.title, date: a.date, location: a.location })),
           commissionPct: c.commissionPct === null || c.commissionPct === undefined ? db.settings.defaultCommissionPct : c.commissionPct,
           totals: {
             consigned: lots.length,
@@ -787,6 +810,7 @@
             number: s.number, auction: auctionRef(s.auctionId), grossHammer: s.grossHammer,
             commissionPct: s.commissionPct, commission: s.commission, netDue: s.netDue,
             status: s.status, paidAt: s.paidAt, method: s.method, createdAt: s.createdAt,
+            lineItems: s.lineItems, passedItems: s.passedItems,
           })),
         },
       };
@@ -801,22 +825,33 @@
         const mine = db.bids.filter((x) => x.lotId === lotId && x.bidderId === bd.id);
         return mine.length ? Math.max(...mine.map((x) => x.amount)) : null;
       };
+      const highBid = (lotId) => {
+        const all = db.bids.filter((x) => x.lotId === lotId);
+        return all.length ? Math.max(...all.map((x) => x.amount)) : 0;
+      };
       return {
         status: 200,
         body: {
           canBid: !!bd,
+          office: officeInfo(),
           auctions: db.auctions.filter((a) => a.status !== 'closed')
             .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
             .map((a) => ({
               id: a.id, title: a.title, date: a.date, location: a.location, status: a.status,
+              publicNotes: a.publicNotes || '',
               premiumPct: auctionPremiumPct(a),
               lots: db.lots.filter((l) => l.auctionId === a.id).sort((x, y) => x.lotNumber - y.lotNumber)
-                .map((l) => ({
-                  id: l.id, lotNumber: l.lotNumber, title: l.title, description: l.description,
-                  category: l.category, quantity: l.quantity, startingBid: l.startingBid,
-                  status: l.status, absenteeCount: db.bids.filter((x) => x.lotId === l.id).length,
-                  myBid: myBidMax(l.id),
-                })),
+                .map((l) => {
+                  const mine = myBidMax(l.id);
+                  return {
+                    id: l.id, lotNumber: l.lotNumber, title: l.title, description: l.description,
+                    category: l.category, quantity: l.quantity, startingBid: l.startingBid,
+                    photos: l.photos || [],
+                    status: l.status, absenteeCount: db.bids.filter((x) => x.lotId === l.id).length,
+                    myBid: mine,
+                    myBidLeading: mine !== null ? mine >= highBid(l.id) : undefined,
+                  };
+                }),
             })),
         },
       };
