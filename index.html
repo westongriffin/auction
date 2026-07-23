@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brinkley Auctions Inc.</title>
+<link rel="icon" href="logo-small.png" type="image/png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <img src="logo-small.png" alt="Brinkley Auctions Inc." class="logo">
+    <h1>Brinkley <span>Auctions</span></h1>
+  </div>
+  <nav id="nav">
+    <button data-view="dashboard" class="active">Dashboard</button>
+    <button data-view="auctions">Auctions</button>
+    <button data-view="lots">Lots</button>
+    <button data-view="bidders">Bidders</button>
+    <button data-view="invoices">Invoices</button>
+    <button data-view="settings">Settings</button>
+  </nav>
+</header>
+
+<main>
+  <!-- Dashboard -->
+  <section id="view-dashboard" class="view">
+    <h2>Dashboard</h2>
+    <div class="stat-grid" id="stats"></div>
+    <div class="two-col">
+      <div class="panel">
+        <h3>Upcoming &amp; live auctions</h3>
+        <div id="dash-auctions"></div>
+      </div>
+      <div class="panel">
+        <h3>Unpaid invoices</h3>
+        <div id="dash-unpaid"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Auctions -->
+  <section id="view-auctions" class="view hidden">
+    <div class="view-head">
+      <h2>Auctions</h2>
+      <button class="primary" id="btn-new-auction">+ New auction</button>
+    </div>
+    <div id="auctions-table"></div>
+  </section>
+
+  <!-- Lots -->
+  <section id="view-lots" class="view hidden">
+    <div class="view-head">
+      <h2>Lots</h2>
+      <div class="head-controls">
+        <select id="lot-filter-auction"></select>
+        <select id="lot-filter-status">
+          <option value="">All statuses</option>
+          <option value="open">Open</option>
+          <option value="sold">Sold</option>
+          <option value="passed">Passed</option>
+        </select>
+        <button class="primary" id="btn-new-lot">+ New lot</button>
+      </div>
+    </div>
+    <div id="lots-table"></div>
+  </section>
+
+  <!-- Bidders -->
+  <section id="view-bidders" class="view hidden">
+    <div class="view-head">
+      <h2>Bidders</h2>
+      <button class="primary" id="btn-new-bidder">+ Register bidder</button>
+    </div>
+    <div id="bidders-table"></div>
+  </section>
+
+  <!-- Invoices -->
+  <section id="view-invoices" class="view hidden">
+    <div class="view-head">
+      <h2>Invoices</h2>
+      <div class="head-controls">
+        <select id="invoice-gen-auction"></select>
+        <button class="primary" id="btn-generate-invoices">Generate for auction</button>
+      </div>
+    </div>
+    <div id="invoices-table"></div>
+  </section>
+
+  <!-- Settings -->
+  <section id="view-settings" class="view hidden">
+    <h2>Settings</h2>
+    <form id="settings-form" class="panel form-grid">
+      <label>Business name <input name="businessName" required></label>
+      <label>Buyer's premium (%) <input name="buyersPremiumPct" type="number" min="0" step="0.1"></label>
+      <label>Sales tax (%) <input name="taxPct" type="number" min="0" step="0.01"></label>
+      <div><button class="primary" type="submit">Save settings</button></div>
+    </form>
+  </section>
+</main>
+
+<dialog id="modal">
+  <form id="modal-form" method="dialog">
+    <h3 id="modal-title"></h3>
+    <div id="modal-fields" class="form-grid"></div>
+    <div class="modal-actions">
+      <button type="button" id="modal-cancel">Cancel</button>
+      <button class="primary" type="submit" id="modal-submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>
