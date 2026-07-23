@@ -593,6 +593,64 @@ button.big { font-size: 20px; padding: 13px 28px; border-radius: 12px; }
 }
 .demo-pop p { margin-bottom: 10px; }
 
+/* ---------- portal mode (same app, entry-gated) ---------- */
+
+body.portal-mode nav,
+body.portal-mode .global-search { display: none; }
+#portal-signout {
+  background: none;
+  color: #c9b5a8;
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: none;
+}
+#portal-signout:hover { color: #fff; border-color: #fff; box-shadow: none; }
+body:not(.portal-mode) #portal-signout { display: none; }
+body.portal-mode main { max-width: 880px; }
+
+.greeting { margin: 4px 0 18px; }
+.lot-card {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.lot-card:last-child { border-bottom: none; }
+.lot-main { flex: 1 1 240px; }
+.lot-side { text-align: right; flex: 0 0 auto; }
+.mybid { color: var(--green); font-weight: 600; font-size: 13px; }
+details.auction-cat { margin-bottom: 12px; }
+details.auction-cat > summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 15px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+details.auction-cat[open] > summary { border-radius: var(--radius) var(--radius) 0 0; }
+details.auction-cat > div {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  padding: 4px 14px;
+}
+
+.demo-hint {
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+}
+.demo-hint code { font-weight: 700; color: var(--accent-dark); }
+
 /* ---------- audit log ---------- */
 
 .audit { max-height: 420px; overflow-y: auto; font-size: 13px; }

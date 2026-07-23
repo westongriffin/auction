@@ -29,6 +29,7 @@
     <button data-view="reports">Reports</button>
     <button data-view="settings">Settings</button>
   </nav>
+  <button id="portal-signout" class="small hidden">Sign out</button>
 </header>
 
 <main>
@@ -184,6 +185,9 @@
     </div>
   </section>
 
+  <!-- Customer / seller portal (same app, gated at entry) -->
+  <section id="view-portal" class="view hidden"></section>
+
   <!-- Settings -->
   <section id="view-settings" class="view hidden">
     <h2>Settings</h2>
@@ -233,13 +237,16 @@
   </form>
 </dialog>
 
-<div id="login-overlay" class="login-overlay hidden">
-  <form id="login-form" class="panel form-grid">
-    <img src="logo-small.png" alt="" style="max-width:220px;margin:0 auto">
-    <h3 style="text-align:center">Enter PIN</h3>
-    <label><input name="pin" type="password" inputmode="numeric" autocomplete="current-password" autofocus></label>
-    <div><button class="primary" type="submit" style="width:100%">Unlock</button></div>
-    <p class="sub" id="login-error"></p>
+<div id="entry-gate" class="login-overlay hidden">
+  <form id="gate-form" class="panel form-grid">
+    <img src="logo-small.png" alt="Brinkley Auctions" style="max-width:220px;margin:0 auto">
+    <h3 style="text-align:center">Welcome</h3>
+    <p class="sub" style="text-align:center">Enter your access code to see your account.</p>
+    <label><input name="secret" type="password" autocomplete="off" placeholder="Access code" style="text-align:center"></label>
+    <div><button class="primary" type="submit" style="width:100%">Sign in</button></div>
+    <p class="sub" id="gate-error" style="color:var(--red);text-align:center;min-height:18px"></p>
+    <button type="button" id="gate-office" class="small hidden" style="margin:0 auto">Enter the office system →</button>
+    <div id="gate-demo-hint" class="demo-hint hidden"></div>
   </form>
 </div>
 

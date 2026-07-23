@@ -88,32 +88,71 @@ async function api(method, path, body) {
   return data;
 }
 
-function showLogin() {
-  $('#login-overlay').classList.remove('hidden');
-  $('#login-form').elements.pin.focus();
+// ---------- entry gate ----------
+// Everyone lands here: one input accepts a customer/seller access code OR the
+// office PIN, and routes to the right experience. On the public internet the
+// server refuses staff sign-in outright, so outsiders can only ever reach the
+// portal no matter what they type.
+
+let portalUser = null; // { code, type, name } when in portal mode
+
+function showLogin() { // kept name: api() calls this on 401
+  document.body.classList.remove('portal-mode');
+  $('#entry-gate').classList.remove('hidden');
+  $('#gate-form').elements.secret.focus();
 }
 
-$('#login-form').addEventListener('submit', async (e) => {
+function enterStaff() {
+  portalUser = null;
+  document.body.classList.remove('portal-mode');
+  $('#portal-signout').classList.add('hidden');
+  $('#entry-gate').classList.add('hidden');
+  refresh();
+}
+
+async function enterPortal(code, who) {
+  portalUser = { code, type: who.type, name: who.name };
+  localStorage.setItem('brinkley-portal-code', code);
+  document.body.classList.add('portal-mode');
+  $('#portal-signout').classList.remove('hidden');
+  $('#entry-gate').classList.add('hidden');
+  document.querySelectorAll('.view').forEach((v) => v.classList.add('hidden'));
+  $('#view-portal').classList.remove('hidden');
+  await renderPortal();
+}
+
+$('#gate-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const pin = e.target.elements.pin.value;
+  const secret = e.target.elements.secret.value.trim();
+  if (!secret) return;
+  $('#gate-error').textContent = '';
+  // 1) portal access code?
   try {
-    const { token } = await (await fetch('/api/login', {
+    const who = await api('GET', `/api/portal/lookup?code=${encodeURIComponent(secret.toUpperCase())}`);
+    e.target.reset();
+    return enterPortal(secret.toUpperCase(), who);
+  } catch { /* not a portal code — try the office PIN */ }
+  // 2) office PIN? (the server rejects this entirely on the public internet)
+  try {
+    const res = await fetch('/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
-    })).json().then((d) => {
-      if (d.error) throw new Error(d.error);
-      return d;
+      body: JSON.stringify({ pin: secret }),
     });
-    authToken = token;
-    localStorage.setItem('brinkley-token', token);
-    $('#login-overlay').classList.add('hidden');
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error);
+    authToken = d.token;
+    localStorage.setItem('brinkley-token', d.token);
     e.target.reset();
-    $('#login-error').textContent = '';
-    refresh();
-  } catch (err) {
-    $('#login-error').textContent = err.message;
-  }
+    return enterStaff();
+  } catch { /* fall through */ }
+  $('#gate-error').textContent = 'That code wasn’t recognized — check with the auction office.';
+});
+
+$('#gate-office').addEventListener('click', () => enterStaff());
+$('#portal-signout').addEventListener('click', () => {
+  localStorage.removeItem('brinkley-portal-code');
+  location.reload();
 });
 
 async function loadAll() {
@@ -1394,6 +1433,28 @@ document.addEventListener('click', (e) => {
   // Actions launched from inside the detail dialog swap to the edit modal.
   if (['edit-bidder', 'edit-consignor'].includes(act) && $('#detail').open) $('#detail').close();
 
+  if (act === 'portal-bid') {
+    const myBid = btn.dataset.my;
+    openModal({
+      title: btn.dataset.title,
+      submitLabel: 'Place bid',
+      fields: [
+        { name: 'amount', label: `Your maximum bid ($)${myBid ? ` — your current bid is ${money(myBid)}` : ''}`,
+          type: 'number', step: '0.01', min: 0, required: true },
+      ],
+      onSubmit: async (v) => {
+        try {
+          const r = await api('POST', '/api/portal/absentee', { code: portalUser.code, lotId: id, amount: v.amount });
+          toast(`Bid of ${money(r.amount)} placed on lot ${r.lotNumber}. Good luck!`);
+          renderPortal();
+        } catch (err) {
+          toast(err.message, true);
+        }
+      },
+    });
+    return;
+  }
+
   if (act === 'view-bidder') openBidderDetail(id);
   if (act === 'view-consignor') openConsignorDetail(id);
   if (act === 'print-bidder') openPrint('bidder', { id });
@@ -1527,6 +1588,132 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// ---------- customer / seller portal (same app, entry-gated) ----------
+
+const portalTiles = (pairs) => `<div class="stat-grid">${pairs.map(([l, v, cls]) =>
+  `<div class="stat ${cls || ''}"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('')}</div>`;
+
+async function renderPortal() {
+  if (!portalUser) return;
+  if (portalUser.type === 'bidder') await renderPortalBidder();
+  else await renderPortalConsignor();
+}
+
+async function renderPortalBidder() {
+  const [me, cat] = await Promise.all([
+    api('GET', `/api/portal/bidder?code=${encodeURIComponent(portalUser.code)}`),
+    api('GET', `/api/portal/catalog?code=${encodeURIComponent(portalUser.code)}`),
+  ]);
+  $('#view-portal').innerHTML = `
+    <div class="greeting">
+      <h2>Welcome back, ${esc(me.name.split(' ')[0])}</h2>
+      <p class="sub">${me.taxExempt ? 'Tax-exempt buyer · ' : ''}This is your account with Brinkley Auctions.</p>
+    </div>
+    ${portalTiles([
+      ['Balance due', money(me.balanceDue), me.balanceDue > 0 ? 'warn' : 'good'],
+      ['Lots won', me.purchases.length],
+      ['Lifetime hammer', money(me.lifetimeHammer)],
+      ['My absentee bids', me.absenteeBids.length],
+    ])}
+    ${me.balanceDue > 0 ? `<div class="panel" style="margin-bottom:14px"><h3>Please settle up</h3>
+      <p class="sub">You have an outstanding balance of <strong>${money(me.balanceDue)}</strong>. Please contact the office or stop by to pay.</p></div>` : ''}
+    <h3 style="margin-top:20px">Upcoming auctions — browse &amp; bid</h3>
+    ${renderPortalCatalog(cat)}
+    <h3 style="margin-top:20px">My invoices</h3>
+    ${me.invoices.length ? me.invoices.map((i) => `
+      <div class="panel" style="margin-bottom:10px">
+        <div class="lot-card" style="border:none;padding:0 0 6px">
+          <div class="lot-main"><strong>INV-${i.number}</strong> — ${esc(i.auction.title)}
+            <div class="sub">${new Date(i.createdAt).toLocaleDateString()}</div></div>
+          <div class="lot-side">${badge(i.status)}<div><strong>${money(i.total)}</strong></div>
+            ${i.balance > 0 ? `<div class="sub">balance ${money(i.balance)}</div>` : ''}</div>
+        </div>
+        <details class="bids"><summary>${i.lineItems.length} lot${i.lineItems.length === 1 ? '' : 's'} · details</summary>
+          ${i.lineItems.map((li) => `<div class="bid-row"><span>Lot ${li.lotNumber} — ${esc(li.title)}${li.quantity > 1 ? ` × ${li.quantity}` : ''}</span><span>${money(li.amount)}</span></div>`).join('')}
+          <div class="bid-row"><span>Buyer's premium (${i.premiumPct}%)</span><span>${money(i.premium)}</span></div>
+          ${i.tax ? `<div class="bid-row"><span>Sales tax (${i.taxPct}%)</span><span>${money(i.tax)}</span></div>` : ''}
+          ${i.payments.map((p) => `<div class="bid-row pay"><span>Paid — ${esc(p.method)} ${new Date(p.time).toLocaleDateString()}</span><span>−${money(p.amount)}</span></div>`).join('')}
+        </details>
+      </div>`).join('') : '<p class="sub">No invoices yet.</p>'}
+    <h3 style="margin-top:20px">My absentee bids</h3>
+    ${me.absenteeBids.length ? `<div class="panel">${me.absenteeBids.map((b) => `
+      <div class="lot-card">
+        <div class="lot-main">Lot ${b.lotNumber} — ${esc(b.title)}<div class="sub">${esc(b.auction.title)}</div></div>
+        <div class="lot-side">${money(b.amount)}
+          <div>${b.lotStatus === 'open' ? badge('open') : b.won ? badge('sold') + ' <span class="mybid">you won!</span>' : badge(b.lotStatus)}</div>
+        </div>
+      </div>`).join('')}</div>` : '<p class="sub">No absentee bids yet — browse the catalog above to place one.</p>'}
+    <h3 style="margin-top:20px">Purchase history</h3>
+    ${me.purchases.length ? `<div class="panel">${me.purchases.map((p) => `
+      <div class="lot-card">
+        <div class="lot-main">Lot ${p.lotNumber} — ${esc(p.title)}${p.quantity > 1 ? ` × ${p.quantity}` : ''}<div class="sub">${esc(p.auction.title)}</div></div>
+        <div class="lot-side"><strong>${money(p.amount)}</strong></div>
+      </div>`).join('')}</div>` : '<p class="sub">No purchases yet.</p>'}`;
+}
+
+function renderPortalCatalog(cat) {
+  if (!cat.auctions.length) return '<p class="sub">No upcoming auctions right now — check back soon.</p>';
+  return cat.auctions.map((a) => {
+    const open = a.lots.filter((l) => l.status === 'open');
+    return `<details class="auction-cat" ${a.status === 'live' ? 'open' : ''}>
+      <summary>${esc(a.title)} ${badge(a.status)} <span class="sub">${fmtDate(a.date)}${a.location ? ' · ' + esc(a.location) : ''} · ${open.length} lot${open.length === 1 ? '' : 's'} open · ${a.premiumPct}% buyer's premium</span></summary>
+      <div>${open.length ? open.map((l) => `
+        <div class="lot-card">
+          <div class="lot-main">
+            <strong>Lot ${l.lotNumber} — ${esc(l.title)}</strong>${l.quantity > 1 ? ` <span class="badge qty">× ${l.quantity} — bid is per item</span>` : ''}
+            ${l.description ? `<div class="sub">${esc(l.description)}</div>` : ''}
+            <div class="sub">${esc(l.category)}${l.absenteeCount ? ` · ${l.absenteeCount} absentee bid${l.absenteeCount === 1 ? '' : 's'} in` : ''}</div>
+            ${l.myBid ? `<div class="mybid">Your bid: ${money(l.myBid)}</div>` : ''}
+          </div>
+          <div class="lot-side">
+            <div class="sub">Starts at</div><strong>${money(l.startingBid)}</strong>
+            ${cat.canBid ? `<div style="margin-top:6px"><button class="small primary" data-act="portal-bid" data-id="${l.id}"
+              data-title="Lot ${l.lotNumber} — ${esc(l.title)}" data-my="${l.myBid || ''}">${l.myBid ? 'Raise bid' : 'Absentee bid'}</button></div>` : ''}
+          </div>
+        </div>`).join('') : '<p class="sub" style="padding:10px 0">All lots in this auction have been hammered.</p>'}
+      </div>
+    </details>`;
+  }).join('');
+}
+
+async function renderPortalConsignor() {
+  const me = await api('GET', `/api/portal/consignor?code=${encodeURIComponent(portalUser.code)}`);
+  $('#view-portal').innerHTML = `
+    <div class="greeting">
+      <h2>Welcome back, ${esc(me.name)}</h2>
+      <p class="sub">Seller account ${esc(me.code)} · your commission rate is ${me.commissionPct}%.</p>
+    </div>
+    ${portalTiles([
+      ['Items consigned', me.totals.consigned],
+      ['Sold', me.totals.sold],
+      ['Gross hammer', money(me.totals.gross), 'good'],
+      ['Paid to you', money(me.totals.netPaid)],
+      ['Owed to you now', money(me.totals.owedNow), me.totals.owedNow > 0 ? 'warn' : ''],
+    ])}
+    <h3 style="margin-top:20px">My settlements</h3>
+    ${me.settlements.length ? me.settlements.map((s) => `
+      <div class="panel" style="margin-bottom:10px">
+        <div class="lot-card" style="border:none;padding:0">
+          <div class="lot-main"><strong>ST-${s.number}</strong> — ${esc(s.auction.title)}
+            <div class="sub">${s.status === 'paid' ? `Paid by ${esc(s.method)} on ${new Date(s.paidAt).toLocaleDateString()}` : 'Payment being prepared'}</div></div>
+          <div class="lot-side">${badge(s.status)}
+            <div class="sub">gross ${money(s.grossHammer)} − ${s.commissionPct}%</div>
+            <div><strong>${money(s.netDue)}</strong></div></div>
+        </div>
+      </div>`).join('') : '<p class="sub">No settlements yet — statements appear here after your items sell.</p>'}
+    <h3 style="margin-top:20px">My items</h3>
+    ${me.lotsByAuction.length ? me.lotsByAuction.map((g) => `
+      <details class="auction-cat" open>
+        <summary>${esc(g.auction.title)} ${badge(g.auction.status)} <span class="sub">${fmtDate(g.auction.date)}</span></summary>
+        <div>${g.lots.map((l) => `
+          <div class="lot-card">
+            <div class="lot-main">Lot ${l.lotNumber} — ${esc(l.title)}${l.quantity > 1 ? ` × ${l.quantity}` : ''}</div>
+            <div class="lot-side">${badge(l.status)} ${l.amount !== null ? `<strong>${money(l.amount)}</strong>` : ''}</div>
+          </div>`).join('')}
+        </div>
+      </details>`).join('') : '<p class="sub">No items consigned yet.</p>'}`;
+}
+
 // ---------- crash reporting ----------
 
 function reportClientError(msg) {
@@ -1549,23 +1736,59 @@ window.addEventListener('unhandledrejection', (e) =>
 // ---------- boot ----------
 
 (async function boot() {
+  // Detect context: real server (local or public tunnel) vs static demo.
   let backendOk = false;
+  let authRequired = false;
   try {
     const res = await fetch('/api/auth-status');
     const ct = res.headers.get('content-type') || '';
     if (res.ok && ct.includes('json')) {
       backendOk = true;
-      const { authRequired } = await res.json();
-      if (authRequired && !authToken) return showLogin();
+      authRequired = (await res.json()).authRequired;
     }
-  } catch { /* no server — fall through to demo detection */ }
+  } catch { /* no server */ }
   if (!backendOk) {
     if (typeof createBrinkleyCore === 'function' && window.BRINKLEY_DEMO_DB) {
       initDemo();
+      const db = demoCore.db;
+      const b = db.bidders.find((x) => x.portalCode);
+      const c = db.consignors.find((x) => x.portalCode);
+      $('#gate-demo-hint').innerHTML = `<strong>Demo.</strong> Try a sample code —
+        buyer: <code>${esc(b ? b.portalCode : '?')}</code> · seller: <code>${esc(c ? c.portalCode : '?')}</code> —
+        or enter the office demo below.`;
+      $('#gate-demo-hint').classList.remove('hidden');
     } else {
       toast('Cannot reach the auction server. Start it with "Start Auction System.command".', true);
       return;
     }
   }
-  refresh();
+
+  // Returning portal user goes straight to their account.
+  const storedCode = localStorage.getItem('brinkley-portal-code');
+  if (storedCode) {
+    try {
+      const who = await api('GET', `/api/portal/lookup?code=${encodeURIComponent(storedCode)}`);
+      return enterPortal(storedCode, who);
+    } catch { localStorage.removeItem('brinkley-portal-code'); }
+  }
+
+  if (demoCore) {
+    $('#gate-office').textContent = 'Enter the office demo →';
+    $('#gate-office').classList.remove('hidden');
+    return showLogin();
+  }
+  if (authRequired) {
+    if (authToken) return enterStaff(); // 401 later re-opens the gate
+    return showLogin();
+  }
+  // No PIN set: staff enters freely from the office Mac. On the public
+  // internet the server refuses staff data, so visitors get the gate.
+  try {
+    const probe = await fetch('/api/settings');
+    if (probe.ok) {
+      $('#gate-office').classList.remove('hidden');
+      return enterStaff();
+    }
+  } catch { /* treat as public */ }
+  showLogin();
 })();
