@@ -1231,6 +1231,9 @@ async function renderSettings() {
   $('#pin-status').textContent = state.settings.pinSet
     ? 'A PIN is set — everyone must log in to use the system.'
     : 'No PIN set — anyone at this computer can use the system.';
+  $('#portal-status').innerHTML = state.settings.portalUrl
+    ? `Customer portal is <strong>online</strong> at <strong>${esc(state.settings.portalUrl)}</strong> — invite texts use this address. Outside visitors can only reach the portal, never this staff system.`
+    : 'Customer portal is offline (local only). Double-click <strong>Start Public Portal.command</strong> in the Auction folder to put it online.';
   const log = await api('GET', '/api/audit?limit=100');
   $('#audit-table').innerHTML = log.length
     ? log.map((e) => `<div class="audit-row"><span class="sub">${new Date(e.time).toLocaleString()}</span> ${esc(e.detail)}</div>`).join('')
@@ -1401,7 +1404,8 @@ document.addEventListener('click', (e) => {
     run(() => api('POST', `/api/consignors/${id}/portal-code`), 'Portal code issued').then(() => openConsignorDetail(id));
   }
   if (act === 'copy-portal') {
-    const invite = `Check your Brinkley Auctions account online: ${location.origin}/portal.html — your access code is ${btn.dataset.code}`;
+    const portalAddr = state.settings.portalUrl || `${location.origin}/portal.html`;
+    const invite = `Check your Brinkley Auctions account online: ${portalAddr} — your access code is ${btn.dataset.code}`;
     navigator.clipboard.writeText(invite).then(
       () => toast('Invite copied — paste it into a text or email'),
       () => toast(invite, false),

@@ -18,6 +18,7 @@
     taxPct: 0,
     defaultCommissionPct: 20,
     invoiceFooter: 'All sales are final. Items sold as-is, where-is.',
+    portalUrl: '',
     pin: '',
     nextInvoiceNumber: 1000,
     nextSettlementNumber: 5000,
