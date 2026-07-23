@@ -54,6 +54,7 @@ function initDemo() {
   $('#demo-banner').classList.remove('hidden');
 }
 
+$('#demo-toggle').addEventListener('click', () => $('#demo-pop').classList.toggle('hidden'));
 $('#demo-reset').addEventListener('click', () => {
   if (!confirm('Reset the demo to its original sample data?')) return;
   localStorage.removeItem('brinkley-demo-db');

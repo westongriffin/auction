@@ -558,35 +558,40 @@ button.big { font-size: 20px; padding: 13px 28px; border-radius: 12px; }
 .login-overlay input[name="pin"] { font-size: 22px; text-align: center; letter-spacing: 0.3em; }
 #login-error { color: var(--red); text-align: center; }
 
-/* ---------- demo banner ---------- */
+/* ---------- demo chip ---------- */
 
-.demo-banner {
+.demo-chip {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  padding: 9px 16px;
-  background: rgba(34, 26, 23, 0.94);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  color: #fff;
-  font-size: 13px;
+  bottom: 14px;
+  right: 14px;
   z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
 }
-.demo-banner button {
-  padding: 3px 11px;
+#demo-toggle {
+  padding: 5px 13px;
   font-size: 12px;
-  background: none;
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.4);
-  box-shadow: none;
+  font-weight: 600;
+  border-radius: 999px;
+  background: rgba(34, 26, 23, 0.92);
+  color: #f0c9c7;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: var(--shadow-md);
 }
-.demo-banner button:hover { border-color: #fff; box-shadow: none; }
+#demo-toggle:hover { color: #fff; border-color: rgba(255, 255, 255, 0.45); }
+.demo-pop {
+  width: min(290px, 82vw);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 14px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.demo-pop p { margin-bottom: 10px; }
 
 /* ---------- audit log ---------- */
 
@@ -658,7 +663,6 @@ button.big { font-size: 20px; padding: 13px 28px; border-radius: 12px; }
   .clerk-title { font-size: 25px; }
 
   .detail-head h3 { font-size: 19px; }
-  .demo-banner { font-size: 12px; padding: 8px 10px; }
 
   /* nav: fade hints there's more to swipe; active tab auto-centers via JS */
   nav {
@@ -693,11 +697,10 @@ button.big { font-size: 20px; padding: 13px 28px; border-radius: 12px; }
   .modal-actions { position: sticky; bottom: 0; background: var(--panel); padding-top: 10px; }
   .modal-actions button { flex: 1; padding: 12px; }
 
-  /* toast clears the demo banner */
   .toast {
     left: 12px;
     right: 12px;
-    bottom: 88px;
+    bottom: 64px;
     transform: none;
     text-align: center;
   }
