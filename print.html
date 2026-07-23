@@ -171,14 +171,25 @@ async function render() {
   }
 
   else if (type === 'report') {
-    const r = await api('/api/reports/auction/' + q.get('auctionId'));
-    document.title = `Auction report — ${r.auction.title}`;
+    const isRange = q.get('from') !== null || q.get('to') !== null;
+    const r = isRange
+      ? await api(`/api/reports/range?from=${q.get('from') || ''}&to=${q.get('to') || ''}`)
+      : await api('/api/reports/auction/' + q.get('auctionId'));
+    const heading = isRange
+      ? `PERIOD REPORT — ${q.get('from') ? fmtDate(q.get('from')) : 'start'} to ${q.get('to') ? fmtDate(q.get('to')) : 'today'}`
+      : `AUCTION REPORT — ${esc(r.auction.title)}`;
+    const subline = isRange
+      ? `${r.auctionCount} auction${r.auctionCount === 1 ? '' : 's'} · printed ${new Date().toLocaleDateString()}`
+      : `${fmtDate(r.auction.date)}${r.auction.location ? ' · ' + esc(r.auction.location) : ''} · printed ${new Date().toLocaleDateString()}`;
+    document.title = heading;
     const row = (l, v) => `<tr><td>${l}</td><td class="num">${v}</td></tr>`;
     html += `
       <div class="doc-meta"><div>
-        <h2>AUCTION REPORT — ${esc(r.auction.title)}</h2>
-        <p class="sub">${fmtDate(r.auction.date)}${r.auction.location ? ' · ' + esc(r.auction.location) : ''} · printed ${new Date().toLocaleDateString()}</p>
+        <h2>${heading}</h2>
+        <p class="sub">${subline}</p>
       </div></div>
+      ${isRange && r.byAuction.length ? `<h3>Auctions in period</h3><table><tr><th></th><th class="num">Sold lots</th><th class="num">Gross</th></tr>
+        ${r.byAuction.map((g) => `<tr><td>${esc(g.label)}</td><td class="num">${g.count}</td><td class="num">${money(g.gross)}</td></tr>`).join('')}</table>` : ''}
       <h3>Results</h3>
       <table>
         ${row('Lots cataloged', r.lotCount)}${row('Sold', r.soldCount)}${row('Passed', r.passedCount)}${row('Still open', r.openCount)}

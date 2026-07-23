@@ -21,6 +21,8 @@ const state = {
   clerkRecent: [],
   cashierAuction: '',
   reportAuction: '',
+  reportFrom: '',
+  reportTo: '',
   report: null,
 };
 
@@ -480,10 +482,10 @@ function openPrint(type, params = {}) {
   window.open('print.html?' + q.toString(), '_blank');
 }
 
-async function downloadCsv(kind, auctionId) {
+async function downloadCsv(kind, opts) {
   try {
     if (demoCore) {
-      const result = demoCore.exportCsv(kind, { auctionId });
+      const result = demoCore.exportCsv(kind, opts);
       if (!result) throw new Error('Export failed');
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([demoCore.rowsToCsv(result.rows)], { type: 'text/csv' }));
@@ -493,7 +495,8 @@ async function downloadCsv(kind, auctionId) {
       toast(`${result.filename} downloaded`);
       return;
     }
-    const res = await fetch(`/api/export/${kind}.csv${auctionId ? '?auctionId=' + auctionId : ''}`, {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(opts).filter(([, v]) => v))).toString();
+    const res = await fetch(`/api/export/${kind}.csv${qs ? '?' + qs : ''}`, {
       headers: authToken ? { 'X-Auth': authToken } : {},
     });
     if (res.status === 401) return showLogin();
@@ -517,23 +520,26 @@ async function downloadCsv(kind, auctionId) {
 async function renderDashboard() {
   const d = await api('GET', '/api/dashboard');
   $('#stats').innerHTML = [
-    ['Auctions', d.auctions],
-    ['Live now', d.liveAuctions],
-    ['Lots sold', `${d.soldLots} / ${d.lots}`],
-    ['Hammer total', money(d.hammerTotal)],
-    ['Invoiced', money(d.invoiceTotal)],
-    ['Buyers owe', money(d.unpaidTotal)],
-    ['Owed to sellers', money(d.settlementsOwedTotal)],
-    ['Customers', d.bidders],
-  ].map(([label, value]) =>
-    `<div class="stat"><div class="label">${label}</div><div class="value">${value}</div></div>`
+    ['Auctions', d.auctions, 'auctions'],
+    ['Live now', d.liveAuctions, 'clerk'],
+    ['Lots sold', `${d.soldLots} / ${d.lots}`, 'lots-sold'],
+    ['Hammer total', money(d.hammerTotal), 'reports'],
+    ['Invoiced', money(d.invoiceTotal), 'cashier'],
+    ['Buyers owe', money(d.unpaidTotal), 'cashier'],
+    ['Owed to sellers', money(d.settlementsOwedTotal), 'cashier'],
+    ['Customers', d.bidders, 'bidders'],
+  ].map(([label, value, drill]) =>
+    `<div class="stat drill" data-drill="${drill}" role="button" tabindex="0" title="Open">
+      <div class="label">${label}</div><div class="value">${value}</div></div>`
   ).join('');
 
   const active = state.auctions.filter((a) => a.status !== 'closed');
   $('#dash-auctions').innerHTML = active.length
     ? '<table><tr><th>Auction</th><th>Date</th><th>Status</th><th class="num">Lots</th><th class="num">Registered</th></tr>' +
       active.map((a) =>
-        `<tr><td>${esc(a.title)}</td><td>${fmtDate(a.date)}</td><td>${badge(a.status)}</td>
+        `<tr class="drill" data-drill="${a.status === 'live' ? 'auction-clerk' : 'auction-lots'}" data-id="${a.id}"
+          title="${a.status === 'live' ? 'Open in Clerk' : 'View lots'}">
+         <td>${esc(a.title)}</td><td>${fmtDate(a.date)}</td><td>${badge(a.status)}</td>
          <td class="num">${state.lots.filter((l) => l.auctionId === a.id).length}</td>
          <td class="num">${regsFor(a.id).length}</td></tr>`
       ).join('') + '</table>'
@@ -546,18 +552,54 @@ async function renderDashboard() {
     html += '<h4>Buyers with a balance</h4><table><tr><th>Invoice</th><th>Buyer</th><th class="num">Balance</th></tr>' +
       unpaid.map((i) => {
         const b = bidderById(i.bidderId);
-        return `<tr><td>INV-${i.number}</td><td>#${i.paddle} ${b ? bidderLink(b.id, b.name) : ''}</td><td class="num">${money(i.total - i.amountPaid)}</td></tr>`;
+        return `<tr class="drill" data-drill="cashier" title="Open Cashier"><td>INV-${i.number}</td><td>#${i.paddle} ${b ? bidderLink(b.id, b.name) : ''}</td><td class="num">${money(i.total - i.amountPaid)}</td></tr>`;
       }).join('') + '</table>';
   }
   if (owed.length) {
     html += '<h4 style="margin-top:10px">Sellers awaiting payout</h4><table><tr><th>Settlement</th><th>Consignor</th><th class="num">Net due</th></tr>' +
       owed.map((s) => {
         const c = consignorById(s.consignorId);
-        return `<tr><td>ST-${s.number}</td><td>${c ? consignorLink(c.id, c.name) : ''}</td><td class="num">${money(s.netDue)}</td></tr>`;
+        return `<tr class="drill" data-drill="cashier" title="Open Cashier"><td>ST-${s.number}</td><td>${c ? consignorLink(c.id, c.name) : ''}</td><td class="num">${money(s.netDue)}</td></tr>`;
       }).join('') + '</table>';
   }
   $('#dash-money').innerHTML = html || '<p class="sub">All settled up. 🎉</p>';
 }
+
+// Dashboard drill-through: cards and rows navigate to the right view with filters set.
+function drillTo(key, id) {
+  if (key === 'auctions') state.view = 'auctions';
+  else if (key === 'clerk') state.view = 'clerk';
+  else if (key === 'bidders') state.view = 'bidders';
+  else if (key === 'reports') state.view = 'reports';
+  else if (key === 'cashier') state.view = 'cashier';
+  else if (key === 'lots-sold') {
+    state.view = 'lots';
+    state.lotFilterStatus = 'sold';
+    state.lotFilterAuction = '';
+    state.lotSearch = '';
+  } else if (key === 'auction-lots') {
+    state.view = 'lots';
+    state.lotFilterAuction = id;
+    state.lotFilterStatus = '';
+    state.lotSearch = '';
+  } else if (key === 'auction-clerk') {
+    state.view = 'clerk';
+    state.clerkAuction = id;
+    state.clerkPos = 0;
+  } else return;
+  refresh();
+}
+
+$('#view-dashboard').addEventListener('click', (e) => {
+  if (e.target.closest('button')) return; // entity links keep their own behavior
+  const el = e.target.closest('[data-drill]');
+  if (el) drillTo(el.dataset.drill, el.dataset.id);
+});
+$('#view-dashboard').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const el = e.target.closest('[data-drill]');
+  if (el) drillTo(el.dataset.drill, el.dataset.id);
+});
 
 // ---------- auctions ----------
 
@@ -1028,26 +1070,48 @@ function renderBidders() {
 
 // ---------- reports ----------
 
+function reportRangeActive() {
+  return !!(state.reportFrom || state.reportTo);
+}
+
 async function renderReports() {
   const setA = auctionOptions($('#report-auction'));
   state.reportAuction = setA(state.reportAuction);
+  $('#report-from').value = state.reportFrom || '';
+  $('#report-to').value = state.reportTo || '';
+  const rangeOn = reportRangeActive();
+  $('#report-clear').classList.toggle('hidden', !rangeOn);
+  $('#report-auction').disabled = rangeOn;
+
   const area = $('#report-area');
-  if (!state.reportAuction) {
+  if (!rangeOn && !state.reportAuction) {
     area.innerHTML = '<div class="empty">Create an auction to see reports.</div>';
     state.report = null;
     return;
   }
-  const r = await api('GET', `/api/reports/auction/${state.reportAuction}`);
+  const r = rangeOn
+    ? await api('GET', `/api/reports/range?from=${state.reportFrom || ''}&to=${state.reportTo || ''}`)
+    : await api('GET', `/api/reports/auction/${state.reportAuction}`);
   state.report = r;
+
   const statRow = (pairs) => `<div class="stat-grid">${pairs.map(([l, v]) =>
     `<div class="stat"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('')}</div>`;
-  const groupTable = (title, rows) => rows.length
-    ? `<div class="panel"><h3>${title}</h3><table><tr><th></th><th class="num">Lots</th><th class="num">Gross</th></tr>` +
-      rows.map((g) => `<tr><td>${esc(g.label)}</td><td class="num">${g.count}</td><td class="num">${money(g.gross)}</td></tr>`).join('') +
-      '</table></div>'
+  const groupTable = (title, rows) => {
+    if (!rows.length) return '';
+    const max = Math.max(...rows.map((g) => g.gross), 1);
+    return `<div class="panel"><h3>${title}</h3><table class="meter-table"><tr><th></th><th class="num">Lots</th><th class="num">Gross</th></tr>` +
+      rows.map((g) => `<tr><td>${esc(g.label)}<div class="meter"><span style="width:${Math.max(2, Math.round(100 * g.gross / max))}%"></span></div></td>
+        <td class="num">${g.count}</td><td class="num">${money(g.gross)}</td></tr>`).join('') +
+      '</table></div>';
+  };
+
+  const headline = rangeOn
+    ? `<p class="sub report-scope">${r.auctionCount} auction${r.auctionCount === 1 ? '' : 's'} between ${state.reportFrom ? fmtDate(state.reportFrom) : 'the beginning'} and ${state.reportTo ? fmtDate(state.reportTo) : 'today'}</p>`
     : '';
-  area.innerHTML =
+
+  area.innerHTML = headline +
     statRow([
+      ...(rangeOn ? [['Auctions', r.auctionCount]] : []),
       ['Lots', r.lotCount],
       ['Sold', r.soldCount],
       ['Passed', r.passedCount],
@@ -1066,7 +1130,8 @@ async function renderReports() {
       ['Commission earned', money(r.commissionEarned)],
       ['Owed to sellers', money(r.owedToConsignors)],
     ]) +
-    `<div class="two-col">
+    (rangeOn ? groupTable('By auction', r.byAuction) : '') +
+    `<div class="two-col" style="margin-top:14px">
       ${groupTable('By consignor', r.byConsignor)}
       ${groupTable('By category', r.byCategory)}
     </div>` +
@@ -1078,11 +1143,21 @@ async function renderReports() {
 }
 
 $('#report-auction').addEventListener('change', (e) => { state.reportAuction = e.target.value; refresh(); });
+$('#report-from').addEventListener('change', (e) => { state.reportFrom = e.target.value; refresh(); });
+$('#report-to').addEventListener('change', (e) => { state.reportTo = e.target.value; refresh(); });
+$('#report-clear').addEventListener('click', () => {
+  state.reportFrom = '';
+  state.reportTo = '';
+  refresh();
+});
 $('#btn-print-report').addEventListener('click', () => {
-  if (state.reportAuction) openPrint('report', { auctionId: state.reportAuction });
+  if (reportRangeActive()) openPrint('report', { from: state.reportFrom || '', to: state.reportTo || '' });
+  else if (state.reportAuction) openPrint('report', { auctionId: state.reportAuction });
 });
 document.querySelectorAll('button[data-csv]').forEach((btn) =>
-  btn.addEventListener('click', () => downloadCsv(btn.dataset.csv, state.reportAuction)));
+  btn.addEventListener('click', () => downloadCsv(btn.dataset.csv, reportRangeActive()
+    ? { from: state.reportFrom, to: state.reportTo }
+    : { auctionId: state.reportAuction })));
 
 // ---------- settings ----------
 

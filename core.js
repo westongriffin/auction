@@ -186,7 +186,7 @@
         email: body.email || '',
         phone: body.phone || '',
         address: body.address || '',
-        commissionPct: body.commissionPct === '' || body.commissionPct === undefined ? null : num(body.commissionPct),
+        commissionPct: body.commissionPct === '' || body.commissionPct === undefined || body.commissionPct === null ? null : num(body.commissionPct),
         notes: body.notes || '',
         createdAt: new Date().toISOString(),
       };
@@ -714,6 +714,75 @@
       };
     });
 
+    // Auctions whose date falls inside [from, to] (ISO date strings, both optional).
+    function auctionsInRange(from, to) {
+      return db.auctions.filter((a) =>
+        a.date && (!from || a.date >= from) && (!to || a.date <= to));
+    }
+
+    route('GET', '/api/reports/range', (params, body, query) => {
+      const from = query.from || '';
+      const to = query.to || '';
+      const auctions = auctionsInRange(from, to).sort((a, b) => a.date.localeCompare(b.date));
+      const ids = new Set(auctions.map((a) => a.id));
+      const lots = db.lots.filter((l) => ids.has(l.auctionId));
+      const sold = lots.filter((l) => l.status === 'sold');
+      const invoices = db.invoices.filter((i) => ids.has(i.auctionId) && i.status !== 'void');
+      const settlements = db.settlements.filter((s) => ids.has(s.auctionId) && s.status !== 'void');
+
+      const groupBy = (keyFn, labelFn) => {
+        const map = new Map();
+        for (const l of sold) {
+          const key = keyFn(l) || '(none)';
+          if (!map.has(key)) map.set(key, { label: labelFn ? labelFn(l) || '(none)' : key, count: 0, gross: 0 });
+          const g = map.get(key);
+          g.count++;
+          g.gross = round2(g.gross + lotAmount(l));
+        }
+        return [...map.values()].sort((a, b) => b.gross - a.gross);
+      };
+
+      const hammered = lots.filter((l) => l.status !== 'open').length;
+      return {
+        status: 200,
+        body: {
+          from, to,
+          auctionCount: auctions.length,
+          lotCount: lots.length,
+          soldCount: sold.length,
+          passedCount: lots.filter((l) => l.status === 'passed').length,
+          openCount: lots.filter((l) => l.status === 'open').length,
+          sellThroughPct: hammered ? round2(100 * sold.length / hammered) : 0,
+          registeredBidders: db.registrations.filter((r) => ids.has(r.auctionId)).length,
+          buyersWhoWon: new Set(sold.map((l) => l.winningRegId)).size,
+          grossHammer: round2(sold.reduce((s, l) => s + lotAmount(l), 0)),
+          premiumCollected: round2(invoices.reduce((s, i) => s + i.premium, 0)),
+          taxCollected: round2(invoices.reduce((s, i) => s + i.tax, 0)),
+          invoicedTotal: round2(invoices.reduce((s, i) => s + i.total, 0)),
+          collectedTotal: round2(invoices.reduce((s, i) => s + i.amountPaid, 0)),
+          outstandingTotal: round2(invoices.reduce((s, i) => s + (i.total - i.amountPaid), 0)),
+          commissionEarned: round2(settlements.reduce((s, x) => s + x.commission, 0)),
+          owedToConsignors: round2(settlements.filter((s) => s.status === 'owed').reduce((s, x) => s + x.netDue, 0)),
+          byAuction: auctions.map((a) => {
+            const aSold = sold.filter((l) => l.auctionId === a.id);
+            return {
+              label: `${a.title} (${a.date})`,
+              count: aSold.length,
+              gross: round2(aSold.reduce((s, l) => s + lotAmount(l), 0)),
+            };
+          }),
+          byCategory: groupBy((l) => l.category),
+          byConsignor: groupBy((l) => l.consignorId, (l) => {
+            const c = findById(db.consignors, l.consignorId);
+            return c ? `${c.code} ${c.name}` : null;
+          }),
+          topLots: [...sold].sort((a, b) => lotAmount(b) - lotAmount(a)).slice(0, 10).map((l) => ({
+            lotNumber: l.lotNumber, title: l.title, amount: lotAmount(l),
+          })),
+        },
+      };
+    });
+
     // -- audit log --
     route('GET', '/api/audit', (params, body, query) => {
       const limit = Math.min(num(query.limit, 100), 500);
@@ -748,9 +817,18 @@
 
     function exportCsv(kind, query) {
       const auctionId = (query && query.auctionId) || '';
+      const from = (query && query.from) || '';
+      const to = (query && query.to) || '';
       const auction = findById(db.auctions, auctionId);
-      const scope = (arr) => (auction ? arr.filter((x) => x.auctionId === auctionId) : arr);
-      const tag = auction ? auction.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase() : 'all';
+      let scope, tag;
+      if (from || to) {
+        const ids = new Set(auctionsInRange(from, to).map((a) => a.id));
+        scope = (arr) => arr.filter((x) => ids.has(x.auctionId));
+        tag = `${from || 'start'}-to-${to || 'now'}`;
+      } else {
+        scope = (arr) => (auction ? arr.filter((x) => x.auctionId === auctionId) : arr);
+        tag = auction ? auction.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase() : 'all';
+      }
 
       if (kind === 'lots') {
         const rows = [['Lot #', 'Title', 'Category', 'Quantity', 'Consignor', 'Starting bid', 'Reserve', 'Status', 'Hammer (each)', 'Extended amount', 'Winning paddle', 'Buyer']];
