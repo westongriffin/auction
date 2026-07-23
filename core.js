@@ -660,6 +660,30 @@
     });
 
     // -- reports --
+    function reportExtras(sold, invoices) {
+      const methods = {};
+      for (const i of invoices) {
+        for (const p of i.payments) methods[p.method] = round2((methods[p.method] || 0) + p.amount);
+      }
+      const buyers = new Map();
+      for (const l of sold) {
+        const reg = findById(db.registrations, l.winningRegId);
+        if (!reg) continue;
+        const b = bidderOfReg(reg);
+        if (!buyers.has(reg.bidderId)) buyers.set(reg.bidderId, { id: reg.bidderId, label: b ? b.name : '?', count: 0, gross: 0 });
+        const g = buyers.get(reg.bidderId);
+        g.count++;
+        g.gross = round2(g.gross + lotAmount(l));
+      }
+      const gross = round2(sold.reduce((s, l) => s + lotAmount(l), 0));
+      return {
+        avgLotPrice: sold.length ? round2(gross / sold.length) : 0,
+        paymentMethods: ['cash', 'check', 'card', 'other'].filter((m) => methods[m])
+          .map((m) => ({ id: m, label: m, count: null, gross: methods[m] })),
+        topBuyers: [...buyers.values()].sort((a, b) => b.gross - a.gross).slice(0, 10),
+      };
+    }
+
     route('GET', '/api/reports/auction/:id', (params) => {
       const auction = findById(db.auctions, params.id);
       if (!auction) return { status: 404, body: { error: 'Auction not found' } };
@@ -673,7 +697,7 @@
         const map = new Map();
         for (const l of sold) {
           const key = keyFn(l) || '(none)';
-          if (!map.has(key)) map.set(key, { label: labelFn ? labelFn(l) || '(none)' : key, count: 0, gross: 0 });
+          if (!map.has(key)) map.set(key, { id: key, label: labelFn ? labelFn(l) || '(none)' : key, count: 0, gross: 0 });
           const g = map.get(key);
           g.count++;
           g.gross = round2(g.gross + lotAmount(l));
@@ -702,13 +726,14 @@
           outstandingTotal: round2(invoices.reduce((s, i) => s + (i.total - i.amountPaid), 0)),
           commissionEarned: round2(settlements.reduce((s, x) => s + x.commission, 0)),
           owedToConsignors: round2(settlements.filter((s) => s.status === 'owed').reduce((s, x) => s + x.netDue, 0)),
+          ...reportExtras(sold, invoices),
           byCategory: groupBy((l) => l.category),
           byConsignor: groupBy((l) => l.consignorId, (l) => {
             const c = findById(db.consignors, l.consignorId);
             return c ? `${c.code} ${c.name}` : null;
           }),
           topLots: [...sold].sort((a, b) => lotAmount(b) - lotAmount(a)).slice(0, 10).map((l) => ({
-            lotNumber: l.lotNumber, title: l.title, amount: lotAmount(l),
+            lotNumber: l.lotNumber, title: l.title, amount: lotAmount(l), auctionId: l.auctionId,
           })),
         },
       };
@@ -734,7 +759,7 @@
         const map = new Map();
         for (const l of sold) {
           const key = keyFn(l) || '(none)';
-          if (!map.has(key)) map.set(key, { label: labelFn ? labelFn(l) || '(none)' : key, count: 0, gross: 0 });
+          if (!map.has(key)) map.set(key, { id: key, label: labelFn ? labelFn(l) || '(none)' : key, count: 0, gross: 0 });
           const g = map.get(key);
           g.count++;
           g.gross = round2(g.gross + lotAmount(l));
@@ -763,21 +788,36 @@
           outstandingTotal: round2(invoices.reduce((s, i) => s + (i.total - i.amountPaid), 0)),
           commissionEarned: round2(settlements.reduce((s, x) => s + x.commission, 0)),
           owedToConsignors: round2(settlements.filter((s) => s.status === 'owed').reduce((s, x) => s + x.netDue, 0)),
+          ...reportExtras(sold, invoices),
           byAuction: auctions.map((a) => {
             const aSold = sold.filter((l) => l.auctionId === a.id);
             return {
+              id: a.id,
               label: `${a.title} (${a.date})`,
               count: aSold.length,
               gross: round2(aSold.reduce((s, l) => s + lotAmount(l), 0)),
             };
           }),
+          monthly: (() => {
+            const map = new Map();
+            for (const l of sold) {
+              const a = findById(db.auctions, l.auctionId);
+              if (!a || !a.date) continue;
+              const m = a.date.slice(0, 7);
+              if (!map.has(m)) map.set(m, { id: m, label: m, count: 0, gross: 0 });
+              const g = map.get(m);
+              g.count++;
+              g.gross = round2(g.gross + lotAmount(l));
+            }
+            return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
+          })(),
           byCategory: groupBy((l) => l.category),
           byConsignor: groupBy((l) => l.consignorId, (l) => {
             const c = findById(db.consignors, l.consignorId);
             return c ? `${c.code} ${c.name}` : null;
           }),
           topLots: [...sold].sort((a, b) => lotAmount(b) - lotAmount(a)).slice(0, 10).map((l) => ({
-            lotNumber: l.lotNumber, title: l.title, amount: lotAmount(l),
+            lotNumber: l.lotNumber, title: l.title, amount: lotAmount(l), auctionId: l.auctionId,
           })),
         },
       };

@@ -198,11 +198,17 @@ async function render() {
       <h3>Money</h3>
       <table>
         ${row('Gross hammer', money(r.grossHammer))}
+        ${row('Average per lot', money(r.avgLotPrice))}
         ${row("Buyer's premium collected", money(r.premiumCollected))}
         ${row('Sales tax collected', money(r.taxCollected))}
         ${row('Invoiced', money(r.invoicedTotal))}${row('Collected', money(r.collectedTotal))}${row('Outstanding', money(r.outstandingTotal))}
         ${row('Commission earned', money(r.commissionEarned))}${row('Owed to consignors', money(r.owedToConsignors))}
+        ${(r.paymentMethods || []).map((m) => row(`Collected by ${m.label}`, money(m.gross))).join('')}
       </table>
+      ${isRange && r.monthly && r.monthly.length ? `<h3>Gross by month</h3><table><tr><th></th><th class="num">Sold lots</th><th class="num">Gross</th></tr>
+        ${r.monthly.map((g) => `<tr><td>${g.label}</td><td class="num">${g.count}</td><td class="num">${money(g.gross)}</td></tr>`).join('')}</table>` : ''}
+      ${r.topBuyers && r.topBuyers.length ? `<h3>Top buyers</h3><table><tr><th></th><th class="num">Lots</th><th class="num">Gross</th></tr>
+        ${r.topBuyers.map((g) => `<tr><td>${esc(g.label)}</td><td class="num">${g.count}</td><td class="num">${money(g.gross)}</td></tr>`).join('')}</table>` : ''}
       ${r.byConsignor.length ? `<h3>By consignor</h3><table><tr><th></th><th class="num">Lots</th><th class="num">Gross</th></tr>
         ${r.byConsignor.map((g) => `<tr><td>${esc(g.label)}</td><td class="num">${g.count}</td><td class="num">${money(g.gross)}</td></tr>`).join('')}</table>` : ''}
       ${r.byCategory.length ? `<h3>By category</h3><table><tr><th></th><th class="num">Lots</th><th class="num">Gross</th></tr>

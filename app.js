@@ -522,16 +522,16 @@ async function downloadCsv(kind, opts) {
 async function renderDashboard() {
   const d = await api('GET', '/api/dashboard');
   $('#stats').innerHTML = [
-    ['Auctions', d.auctions, 'auctions'],
-    ['Live now', d.liveAuctions, 'clerk'],
-    ['Lots sold', `${d.soldLots} / ${d.lots}`, 'lots-sold'],
-    ['Hammer total', money(d.hammerTotal), 'reports'],
-    ['Invoiced', money(d.invoiceTotal), 'cashier'],
-    ['Buyers owe', money(d.unpaidTotal), 'cashier'],
-    ['Owed to sellers', money(d.settlementsOwedTotal), 'cashier'],
-    ['Customers', d.bidders, 'bidders'],
-  ].map(([label, value, drill]) =>
-    `<div class="stat drill" data-drill="${drill}" role="button" tabindex="0" title="Open">
+    ['Auctions', d.auctions, 'auctions', ''],
+    ['Live now', d.liveAuctions, 'clerk', d.liveAuctions ? 'good' : ''],
+    ['Lots sold', `${d.soldLots} / ${d.lots}`, 'lots-sold', ''],
+    ['Hammer total', money(d.hammerTotal), 'reports', 'good'],
+    ['Invoiced', money(d.invoiceTotal), 'cashier', ''],
+    ['Buyers owe', money(d.unpaidTotal), 'cashier', d.unpaidTotal > 0 ? 'warn' : ''],
+    ['Owed to sellers', money(d.settlementsOwedTotal), 'cashier', d.settlementsOwedTotal > 0 ? 'urgent' : ''],
+    ['Customers', d.bidders, 'bidders', ''],
+  ].map(([label, value, drill, cls]) =>
+    `<div class="stat drill ${cls}" data-drill="${drill}" role="button" tabindex="0" title="Open">
       <div class="label">${label}</div><div class="value">${value}</div></div>`
   ).join('');
 
@@ -571,6 +571,8 @@ async function renderDashboard() {
 function drillTo(key, id) {
   if (key === 'auctions') state.view = 'auctions';
   else if (key === 'clerk') state.view = 'clerk';
+  else if (key === 'lots') state.view = 'lots';
+  else if (key === 'checkin') state.view = 'checkin';
   else if (key === 'bidders') state.view = 'bidders';
   else if (key === 'reports') state.view = 'reports';
   else if (key === 'cashier') state.view = 'cashier';
@@ -1096,14 +1098,17 @@ async function renderReports() {
     : await api('GET', `/api/reports/auction/${state.reportAuction}`);
   state.report = r;
 
-  const statRow = (pairs) => `<div class="stat-grid">${pairs.map(([l, v]) =>
-    `<div class="stat"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('')}</div>`;
-  const groupTable = (title, rows) => {
-    if (!rows.length) return '';
+  const statRow = (pairs) => `<div class="stat-grid">${pairs.map(([l, v, drill]) =>
+    `<div class="stat${drill ? ' drill" data-rdrill="goto" data-id="' + drill : ''}"${drill ? ' role="button" tabindex="0"' : ''}>
+      <div class="label">${l}</div><div class="value">${v}</div></div>`).join('')}</div>`;
+  const fmtMonth = (m) => new Date(m + '-15T12:00:00').toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  const groupTable = (title, rows, drillType, countHead = 'Lots') => {
+    if (!rows || !rows.length) return '';
     const max = Math.max(...rows.map((g) => g.gross), 1);
-    return `<div class="panel"><h3>${title}</h3><table class="meter-table"><tr><th></th><th class="num">Lots</th><th class="num">Gross</th></tr>` +
-      rows.map((g) => `<tr><td>${esc(g.label)}<div class="meter"><span style="width:${Math.max(2, Math.round(100 * g.gross / max))}%"></span></div></td>
-        <td class="num">${g.count}</td><td class="num">${money(g.gross)}</td></tr>`).join('') +
+    return `<div class="panel"><h3>${title}</h3><table class="meter-table"><tr><th></th><th class="num">${countHead}</th><th class="num">Gross</th></tr>` +
+      rows.map((g) => `<tr${drillType ? ` class="drill" data-rdrill="${drillType}" data-id="${esc(g.id ?? '')}"` : ''} title="${drillType ? 'Open' : ''}">
+        <td>${esc(drillType === 'month' ? fmtMonth(g.label) : g.label)}<div class="meter"><span style="width:${Math.max(2, Math.round(100 * g.gross / max))}%"></span></div></td>
+        <td class="num">${g.count ?? '—'}</td><td class="num">${money(g.gross)}</td></tr>`).join('') +
       '</table></div>';
   };
 
@@ -1113,36 +1118,76 @@ async function renderReports() {
 
   area.innerHTML = headline +
     statRow([
-      ...(rangeOn ? [['Auctions', r.auctionCount]] : []),
-      ['Lots', r.lotCount],
+      ...(rangeOn ? [['Auctions', r.auctionCount, 'auctions']] : []),
+      ['Lots', r.lotCount, 'lots'],
       ['Sold', r.soldCount],
       ['Passed', r.passedCount],
       ['Still open', r.openCount],
       ['Sell-through', r.sellThroughPct + '%'],
-      ['Registered', r.registeredBidders],
+      ['Registered', r.registeredBidders, 'checkin'],
       ['Buyers', r.buyersWhoWon],
+      ['Avg lot price', money(r.avgLotPrice)],
       ['Gross hammer', money(r.grossHammer)],
     ]) +
     statRow([
       ['Premium collected', money(r.premiumCollected)],
       ['Tax collected', money(r.taxCollected)],
-      ['Invoiced', money(r.invoicedTotal)],
-      ['Collected', money(r.collectedTotal)],
-      ['Outstanding', money(r.outstandingTotal)],
+      ['Invoiced', money(r.invoicedTotal), 'cashier'],
+      ['Collected', money(r.collectedTotal), 'cashier'],
+      ['Outstanding', money(r.outstandingTotal), 'cashier'],
       ['Commission earned', money(r.commissionEarned)],
-      ['Owed to sellers', money(r.owedToConsignors)],
+      ['Owed to sellers', money(r.owedToConsignors), 'cashier'],
     ]) +
-    (rangeOn ? groupTable('By auction', r.byAuction) : '') +
+    (rangeOn ? groupTable('Gross by month', r.monthly, 'month') : '') +
+    (rangeOn ? groupTable('By auction — tap to open its report', r.byAuction, 'auction') : '') +
     `<div class="two-col" style="margin-top:14px">
-      ${groupTable('By consignor', r.byConsignor)}
-      ${groupTable('By category', r.byCategory)}
+      ${groupTable('By consignor', r.byConsignor, 'consignor')}
+      ${groupTable('By category', r.byCategory, 'category')}
+    </div>` +
+    `<div class="two-col" style="margin-top:14px">
+      ${groupTable('Top buyers', r.topBuyers, 'bidder')}
+      ${groupTable('Money collected by method', r.paymentMethods, null, '')}
     </div>` +
     (r.topLots.length
       ? `<div class="panel" style="margin-top:14px"><h3>Top lots</h3><table><tr><th>Lot</th><th></th><th class="num">Amount</th></tr>` +
-        r.topLots.map((t) => `<tr><td>${t.lotNumber}</td><td>${esc(t.title)}</td><td class="num">${money(t.amount)}</td></tr>`).join('') +
+        r.topLots.map((t) => `<tr class="drill" data-rdrill="lot" data-id="${t.auctionId}" data-q="${esc(t.title)}" title="Open">
+          <td>${t.lotNumber}</td><td>${esc(t.title)}</td><td class="num">${money(t.amount)}</td></tr>`).join('') +
         '</table></div>'
       : '');
 }
+
+// Report drill-through: rows open the entity they describe.
+$('#report-area').addEventListener('click', (e) => {
+  if (e.target.closest('button')) return;
+  const el = e.target.closest('[data-rdrill]');
+  if (!el) return;
+  const { rdrill, id } = el.dataset;
+  if (rdrill === 'goto') drillTo(id);
+  else if (rdrill === 'consignor' && id) openConsignorDetail(id);
+  else if (rdrill === 'bidder' && id) openBidderDetail(id);
+  else if (rdrill === 'auction' && id) {
+    state.reportFrom = '';
+    state.reportTo = '';
+    state.reportAuction = id;
+    refresh();
+  } else if (rdrill === 'category') {
+    state.view = 'lots';
+    state.lotFilterAuction = reportRangeActive() ? '' : state.reportAuction;
+    state.lotFilterStatus = 'sold';
+    state.lotSearch = id === '(none)' ? '' : id;
+    refresh();
+  } else if (rdrill === 'lot') {
+    state.view = 'lots';
+    state.lotFilterAuction = id || '';
+    state.lotFilterStatus = '';
+    state.lotSearch = el.dataset.q || '';
+    refresh();
+  } else if (rdrill === 'month') {
+    state.reportFrom = id + '-01';
+    state.reportTo = id + '-31';
+    refresh();
+  }
+});
 
 $('#report-auction').addEventListener('change', (e) => { state.reportAuction = e.target.value; refresh(); });
 $('#report-from').addEventListener('change', (e) => { state.reportFrom = e.target.value; refresh(); });
@@ -1249,7 +1294,14 @@ async function refresh() {
   }
   const view = state.view;
   document.querySelectorAll('.view').forEach((v) => v.classList.add('hidden'));
-  $(`#view-${view}`).classList.remove('hidden');
+  const section = $(`#view-${view}`);
+  section.classList.remove('hidden');
+  if (refresh.lastView !== view) {
+    refresh.lastView = view;
+    section.classList.add('entering');
+    clearTimeout(refresh.enterTimer);
+    refresh.enterTimer = setTimeout(() => section.classList.remove('entering'), 550);
+  }
   document.querySelectorAll('nav button').forEach((b) =>
     b.classList.toggle('active', b.dataset.view === view));
   const navEl = document.querySelector('nav');
