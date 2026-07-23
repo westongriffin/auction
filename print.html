@@ -32,19 +32,51 @@
 </head>
 <body>
 <div id="doc"><p class="sub">Preparing document…</p></div>
+<script src="core.js"></script>
+<script src="demo-data.js"></script>
 <script>
 const q = new URLSearchParams(location.search);
 const token = localStorage.getItem('brinkley-token') || '';
+
+// On static hosting there is no server — read through core.js instead.
+let demoCore = null;
+function ensureDemoCore() {
+  if (!demoCore) {
+    demoCore = createBrinkleyCore({
+      load() {
+        try { return JSON.parse(localStorage.getItem('brinkley-demo-db')) || window.BRINKLEY_DEMO_DB; }
+        catch { return window.BRINKLEY_DEMO_DB; }
+      },
+      save() { /* printing never writes */ },
+    });
+  }
+  return demoCore;
+}
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (s) => (s ? new Date(s + (s.length === 10 ? 'T12:00:00' : '')).toLocaleDateString() : '');
 
 async function api(path) {
-  const res = await fetch(path, { headers: token ? { 'X-Auth': token } : {} });
+  if (demoCore) return demoApiGet(path);
+  let res;
+  try {
+    res = await fetch(path, { headers: token ? { 'X-Auth': token } : {} });
+  } catch {
+    return demoApiGet(path); // no server at all (static hosting)
+  }
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('json')) return demoApiGet(path); // static host served a 404 page
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to load');
   return data;
+}
+
+function demoApiGet(path) {
+  const url = new URL(path, location.origin);
+  const result = ensureDemoCore().dispatch('GET', url.pathname, {}, Object.fromEntries(url.searchParams));
+  if (!result || result.status >= 400) throw new Error((result && result.body.error) || 'Failed to load');
+  return result.body;
 }
 
 function head(s) {

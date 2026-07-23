@@ -391,6 +391,32 @@ button.link:hover { color: var(--accent); }
 .detail-stats .stat { padding: 10px 12px; }
 .detail-stats .value { font-size: 20px; }
 
+/* demo banner */
+.demo-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 13px;
+  z-index: 40;
+}
+.demo-banner button {
+  padding: 3px 10px;
+  font-size: 12px;
+  background: none;
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.demo-banner button:hover { border-color: #fff; }
+
 /* audit log */
 .audit { max-height: 420px; overflow-y: auto; font-size: 13px; }
 .audit-row { padding: 5px 0; border-bottom: 1px solid var(--line); }

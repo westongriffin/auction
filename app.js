@@ -34,7 +34,40 @@ const fmtDate = (s) => (s ? new Date(s + (s.length === 10 ? 'T12:00:00' : '')).t
 
 let authToken = localStorage.getItem('brinkley-token') || '';
 
+// Demo mode: on static hosting (e.g. GitHub Pages) there is no server, so the
+// whole system runs in the browser via core.js against localStorage.
+let demoCore = null;
+
+function initDemo() {
+  const persist = {
+    load() {
+      try { return JSON.parse(localStorage.getItem('brinkley-demo-db')); } catch { return null; }
+    },
+    save(d) {
+      try { localStorage.setItem('brinkley-demo-db', JSON.stringify(d)); } catch { /* storage full/blocked — keep going in memory */ }
+    },
+  };
+  if (!persist.load() && window.BRINKLEY_DEMO_DB) persist.save(window.BRINKLEY_DEMO_DB);
+  demoCore = createBrinkleyCore(persist);
+  $('#demo-banner').classList.remove('hidden');
+}
+
+$('#demo-reset').addEventListener('click', () => {
+  if (!confirm('Reset the demo to its original sample data?')) return;
+  localStorage.removeItem('brinkley-demo-db');
+  location.reload();
+});
+
+function demoApi(method, path, body) {
+  const url = new URL(path, location.origin);
+  const result = demoCore.dispatch(method, url.pathname, body || {}, Object.fromEntries(url.searchParams));
+  if (!result) throw new Error('No such endpoint');
+  if (result.status >= 400) throw new Error(result.body.error || 'Request failed');
+  return JSON.parse(JSON.stringify(result.body));
+}
+
 async function api(method, path, body) {
+  if (demoCore) return demoApi(method, path, body);
   const res = await fetch(path, {
     method,
     headers: {
@@ -449,6 +482,17 @@ function openPrint(type, params = {}) {
 
 async function downloadCsv(kind, auctionId) {
   try {
+    if (demoCore) {
+      const result = demoCore.exportCsv(kind, { auctionId });
+      if (!result) throw new Error('Export failed');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([demoCore.rowsToCsv(result.rows)], { type: 'text/csv' }));
+      a.download = result.filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast(`${result.filename} downloaded`);
+      return;
+    }
     const res = await fetch(`/api/export/${kind}.csv${auctionId ? '?auctionId=' + auctionId : ''}`, {
       headers: authToken ? { 'X-Auth': authToken } : {},
     });
@@ -1310,9 +1354,23 @@ window.addEventListener('unhandledrejection', (e) =>
 // ---------- boot ----------
 
 (async function boot() {
+  let backendOk = false;
   try {
-    const { authRequired } = await (await fetch('/api/auth-status')).json();
-    if (authRequired && !authToken) return showLogin();
-  } catch { /* fall through to refresh, which will surface errors */ }
+    const res = await fetch('/api/auth-status');
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('json')) {
+      backendOk = true;
+      const { authRequired } = await res.json();
+      if (authRequired && !authToken) return showLogin();
+    }
+  } catch { /* no server — fall through to demo detection */ }
+  if (!backendOk) {
+    if (typeof createBrinkleyCore === 'function' && window.BRINKLEY_DEMO_DB) {
+      initDemo();
+    } else {
+      toast('Cannot reach the auction server. Start it with "Start Auction System.command".', true);
+      return;
+    }
+  }
   refresh();
 })();
