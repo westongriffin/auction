@@ -427,6 +427,7 @@ function openBidderDetail(id) {
         return l ? `<tr><td>Lot ${l.lotNumber} — ${esc(l.title)}</td><td>${esc(auctionById(l.auctionId)?.title || '')}</td>
           <td class="num">${money(x.amount)}</td><td>${badge(l.status)}</td></tr>` : '';
       }).join('') + '</table>' : ''}`;
+  wrapTables();
   $('#detail').showModal();
 }
 
@@ -470,6 +471,7 @@ function openConsignorDetail(id) {
         <td>${esc(l.title)}${l.quantity > 1 ? ` × ${l.quantity}` : ''}</td><td>${badge(l.status)}</td>
         <td class="num">${l.status === 'sold' ? money(lotAmount(l)) : '—'}</td></tr>`).join('') + '</table>'
       : '<p class="sub">No lots consigned yet.</p>'}`;
+  wrapTables();
   $('#detail').showModal();
 }
 
@@ -1207,6 +1209,19 @@ $('#pin-form').addEventListener('submit', (e) => {
   });
 });
 
+// Wrap every rendered table in a horizontal-scroll container so wide tables
+// pan within themselves on small screens instead of stretching the page.
+function wrapTables() {
+  document.querySelectorAll('main table, #detail-body table').forEach((t) => {
+    if (!t.parentElement.classList.contains('table-scroll')) {
+      const w = document.createElement('div');
+      w.className = 'table-scroll';
+      t.parentNode.insertBefore(w, t);
+      w.appendChild(t);
+    }
+  });
+}
+
 // ---------- navigation & refresh ----------
 
 async function refresh() {
@@ -1232,6 +1247,7 @@ async function refresh() {
   if (view === 'bidders') renderBidders();
   if (view === 'reports') await renderReports();
   if (view === 'settings') await renderSettings();
+  wrapTables();
 }
 
 $('#nav').addEventListener('click', (e) => {

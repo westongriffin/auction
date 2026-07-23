@@ -227,6 +227,13 @@ tr.drill:hover td { background: var(--accent-soft); }
 
 /* ---------- tables ---------- */
 
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius);
+}
+.table-scroll table { min-width: 100%; }
+
 table {
   width: 100%;
   border-collapse: separate;
@@ -555,8 +562,51 @@ button.big { font-size: 20px; padding: 13px 28px; border-radius: 12px; }
 /* ---------- small screens ---------- */
 
 @media (max-width: 700px) {
-  header { padding: 8px 14px; }
-  main { padding: 18px 14px 110px; }
+  html { scroll-padding-top: 110px; }
+  body { overflow-x: hidden; }
+
+  /* compact sticky header: logo + search on one row, nav as one scrollable row */
+  header { padding: 8px 12px 0; gap: 8px 10px; }
   .brand h1 { display: none; }
-  .clerk-form input { width: 120px; font-size: 22px; }
+  .brand .logo { height: 36px; }
+  .global-search { flex: 1; min-width: 0; max-width: none; }
+  .global-search input { padding: 7px 14px; }
+  nav {
+    flex: 1 0 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 8px;
+  }
+  nav::-webkit-scrollbar { display: none; }
+  nav button { white-space: nowrap; padding: 6px 12px; }
+
+  main { padding: 18px 12px 130px; }
+  h2 { font-size: 23px; margin-bottom: 14px; }
+
+  /* prevent iOS auto-zoom on focus */
+  input, select, textarea { font-size: 16px; }
+
+  /* filter rows become tidy full-width stacks */
+  .head-controls { width: 100%; }
+  .head-controls select,
+  .head-controls input:not([type="date"]) { flex: 1 1 150px; min-width: 0; }
+  .head-controls input[type="date"] { flex: 1 1 130px; min-width: 0; }
+  input[type="search"] { min-width: 0; }
+
+  th, td { padding: 8px 10px; font-size: 13px; }
+  .stat { padding: 13px 13px 11px; }
+  .stat .value { font-size: 22px; }
+
+  .clerk-form { gap: 10px; }
+  .clerk-form label { flex: 1 1 40%; }
+  .clerk-form input { width: 100%; font-size: 24px; }
+  .clerk-form button.big { flex: 1 1 auto; }
+  .clerk-title { font-size: 25px; }
+
+  dialog { padding: 18px; }
+  .detail-head h3 { font-size: 19px; }
+
+  .demo-banner { font-size: 12px; padding: 8px 10px; }
 }
