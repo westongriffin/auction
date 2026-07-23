@@ -605,8 +605,108 @@ button.big { font-size: 20px; padding: 13px 28px; border-radius: 12px; }
   .clerk-form button.big { flex: 1 1 auto; }
   .clerk-title { font-size: 25px; }
 
-  dialog { padding: 18px; }
   .detail-head h3 { font-size: 19px; }
-
   .demo-banner { font-size: 12px; padding: 8px 10px; }
+
+  /* nav: fade hints there's more to swipe; active tab auto-centers via JS */
+  nav {
+    -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent);
+  }
+
+  /* thumb-sized touch targets */
+  button.small { padding: 8px 14px; font-size: 14px; border-radius: 9px; }
+  button.link { padding: 2px 0; }
+
+  /* search results become a full-width sheet under the header */
+  .search-results {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    top: 60px;
+    max-height: 62vh;
+  }
+  .search-item { padding: 11px 14px; }
+
+  /* dialogs become bottom sheets */
+  dialog {
+    width: 100%;
+    max-width: 100%;
+    margin: auto 0 0;
+    border-radius: 20px 20px 0 0;
+    padding: 20px 16px calc(22px + env(safe-area-inset-bottom));
+  }
+  dialog[open] { animation: sheet-up 0.22s ease; }
+  #detail { width: 100%; max-height: 90vh; }
+  .modal-actions { position: sticky; bottom: 0; background: var(--panel); padding-top: 10px; }
+  .modal-actions button { flex: 1; padding: 12px; }
+
+  /* toast clears the demo banner */
+  .toast {
+    left: 12px;
+    right: 12px;
+    bottom: 88px;
+    transform: none;
+    text-align: center;
+  }
+
+  /* ---- wide tables become card stacks ---- */
+  .table-scroll { overflow: visible; border-radius: 0; }
+  .table-scroll:has(> table:not(.rtable)) { overflow-x: auto; }
+  .rtable {
+    display: block;
+    border: none;
+    background: none;
+    box-shadow: none;
+    min-width: 0 !important;
+  }
+  .rtable tbody { display: block; }
+  .rtable tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 16px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    margin-bottom: 10px;
+    padding: 12px 14px;
+    box-shadow: var(--shadow-sm);
+  }
+  .rtable tr:first-child { display: none; } /* header row */
+  .rtable td {
+    display: block;
+    border: none;
+    padding: 4px 0;
+    background: none !important;
+    font-size: 14px;
+  }
+  .rtable td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 1px;
+  }
+  .rtable td.num { text-align: left; }
+  .rtable td.actions {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    text-align: left;
+    padding-top: 10px;
+    margin-top: 6px;
+    border-top: 1px dashed var(--line);
+    white-space: normal;
+  }
+  .rtable td.actions:empty { display: none; }
+  .rtable td:empty { display: none; }
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(28px); opacity: 0.5; }
+  to { transform: translateY(0); opacity: 1; }
 }
