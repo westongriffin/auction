@@ -1288,6 +1288,25 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// ---------- crash reporting ----------
+
+function reportClientError(msg) {
+  if (!msg || msg === 'Login required') return;
+  try {
+    fetch('/api/client-error', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ msg }),
+    });
+  } catch { /* reporting must never break the app */ }
+  toast('Something went wrong: ' + msg, true);
+}
+
+window.addEventListener('error', (e) =>
+  reportClientError(`${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`));
+window.addEventListener('unhandledrejection', (e) =>
+  reportClientError(e.reason && e.reason.message ? e.reason.message : String(e.reason)));
+
 // ---------- boot ----------
 
 (async function boot() {
