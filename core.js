@@ -44,6 +44,10 @@
     for (const b of d.bidders) {
       if (b.taxExempt === undefined) b.taxExempt = false;
       if (b.idNumber === undefined) b.idNumber = '';
+      if (b.portalCode === undefined) b.portalCode = null;
+    }
+    for (const c of d.consignors) {
+      if (c.portalCode === undefined) c.portalCode = null;
     }
     for (const inv of d.invoices) {
       if (!Array.isArray(inv.payments)) inv.payments = [];
@@ -657,6 +661,185 @@
       }
       saveDb();
       return { status: 200, body: st };
+    });
+
+    // -- customer & consignor portals --
+    // Access is by per-person code. Portal payloads contain ONLY that person's
+    // data and never expose reserves, internal notes, ID numbers, or other
+    // customers' records.
+
+    const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    function makePortalCode() {
+      let raw = '';
+      for (let i = 0; i < 8; i++) raw += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+      return raw.slice(0, 4) + '-' + raw.slice(4);
+    }
+    function issueCode() {
+      let code;
+      do { code = makePortalCode(); }
+      while (db.bidders.some((x) => x.portalCode === code) || db.consignors.some((x) => x.portalCode === code));
+      return code;
+    }
+    const normCode = (c) => String(c || '').trim().toUpperCase();
+    const bidderByCode = (c) => { const code = normCode(c); return code ? db.bidders.find((b) => b.portalCode === code) : null; };
+    const consignorByCode = (c) => { const code = normCode(c); return code ? db.consignors.find((x) => x.portalCode === code) : null; };
+    const auctionRef = (id) => {
+      const a = findById(db.auctions, id);
+      return a ? { title: a.title, date: a.date, status: a.status } : { title: '?', date: '', status: '' };
+    };
+
+    route('POST', '/api/bidders/:id/portal-code', (params) => {
+      const b = findById(db.bidders, params.id);
+      if (!b) return { status: 404, body: { error: 'Bidder not found' } };
+      b.portalCode = issueCode();
+      audit('portal.code', `Portal code issued for bidder "${b.name}"`);
+      saveDb();
+      return { status: 200, body: { code: b.portalCode } };
+    });
+    route('POST', '/api/consignors/:id/portal-code', (params) => {
+      const c = findById(db.consignors, params.id);
+      if (!c) return { status: 404, body: { error: 'Consignor not found' } };
+      c.portalCode = issueCode();
+      audit('portal.code', `Portal code issued for consignor ${c.code} "${c.name}"`);
+      saveDb();
+      return { status: 200, body: { code: c.portalCode } };
+    });
+
+    route('GET', '/api/portal/lookup', (params, body, query) => {
+      const b = bidderByCode(query.code);
+      if (b) return { status: 200, body: { type: 'bidder', name: b.name } };
+      const c = consignorByCode(query.code);
+      if (c) return { status: 200, body: { type: 'consignor', name: c.name } };
+      return { status: 404, body: { error: 'Code not recognized — check with the auction office' } };
+    });
+
+    route('GET', '/api/portal/bidder', (params, body, query) => {
+      const bd = bidderByCode(query.code);
+      if (!bd) return { status: 404, body: { error: 'Code not recognized' } };
+      const regs = db.registrations.filter((r) => r.bidderId === bd.id);
+      const regIds = new Set(regs.map((r) => r.id));
+      const wins = db.lots.filter((l) => l.status === 'sold' && regIds.has(l.winningRegId));
+      const invoices = db.invoices.filter((i) => i.bidderId === bd.id && i.status !== 'void');
+      return {
+        status: 200,
+        body: {
+          name: bd.name,
+          email: bd.email,
+          phone: bd.phone,
+          taxExempt: !!bd.taxExempt,
+          balanceDue: round2(invoices.reduce((s, i) => s + (i.total - i.amountPaid), 0)),
+          lifetimeHammer: round2(wins.reduce((s, l) => s + lotAmount(l), 0)),
+          registrations: regs.map((r) => ({ paddle: r.paddle, taxExempt: r.taxExempt, auction: auctionRef(r.auctionId) })),
+          purchases: wins.map((l) => ({
+            auction: auctionRef(l.auctionId), lotNumber: l.lotNumber, title: l.title,
+            quantity: l.quantity, hammerPrice: l.hammerPrice, amount: lotAmount(l),
+          })),
+          invoices: invoices.map((i) => ({
+            number: i.number, auction: auctionRef(i.auctionId), createdAt: i.createdAt,
+            lineItems: i.lineItems, subtotal: i.subtotal, premiumPct: i.premiumPct, premium: i.premium,
+            taxPct: i.taxPct, tax: i.tax, total: i.total, amountPaid: i.amountPaid,
+            balance: round2(i.total - i.amountPaid), status: i.status,
+            payments: i.payments.map((p) => ({ amount: p.amount, method: p.method, time: p.time })),
+          })),
+          absenteeBids: db.bids.filter((x) => x.bidderId === bd.id).map((x) => {
+            const l = findById(db.lots, x.lotId);
+            return l ? {
+              auction: auctionRef(l.auctionId), lotNumber: l.lotNumber, title: l.title,
+              amount: x.amount, lotStatus: l.status,
+              won: l.status === 'sold' && regIds.has(l.winningRegId),
+            } : null;
+          }).filter(Boolean),
+        },
+      };
+    });
+
+    route('GET', '/api/portal/consignor', (params, body, query) => {
+      const c = consignorByCode(query.code);
+      if (!c) return { status: 404, body: { error: 'Code not recognized' } };
+      const lots = db.lots.filter((l) => l.consignorId === c.id);
+      const sold = lots.filter((l) => l.status === 'sold');
+      const settlements = db.settlements.filter((s) => s.consignorId === c.id && s.status !== 'void');
+      const byAuction = new Map();
+      for (const l of lots) {
+        if (!byAuction.has(l.auctionId)) byAuction.set(l.auctionId, { auction: auctionRef(l.auctionId), lots: [] });
+        byAuction.get(l.auctionId).lots.push({
+          lotNumber: l.lotNumber, title: l.title, quantity: l.quantity, status: l.status,
+          hammerPrice: l.hammerPrice, amount: l.status === 'sold' ? lotAmount(l) : null,
+        });
+      }
+      for (const g of byAuction.values()) g.lots.sort((a, b) => a.lotNumber - b.lotNumber);
+      return {
+        status: 200,
+        body: {
+          name: c.name,
+          code: c.code,
+          commissionPct: c.commissionPct === null || c.commissionPct === undefined ? db.settings.defaultCommissionPct : c.commissionPct,
+          totals: {
+            consigned: lots.length,
+            sold: sold.length,
+            gross: round2(sold.reduce((s, l) => s + lotAmount(l), 0)),
+            netPaid: round2(settlements.filter((s) => s.status === 'paid').reduce((s, x) => s + x.netDue, 0)),
+            owedNow: round2(settlements.filter((s) => s.status === 'owed').reduce((s, x) => s + x.netDue, 0)),
+          },
+          lotsByAuction: [...byAuction.values()],
+          settlements: settlements.map((s) => ({
+            number: s.number, auction: auctionRef(s.auctionId), grossHammer: s.grossHammer,
+            commissionPct: s.commissionPct, commission: s.commission, netDue: s.netDue,
+            status: s.status, paidAt: s.paidAt, method: s.method, createdAt: s.createdAt,
+          })),
+        },
+      };
+    });
+
+    route('GET', '/api/portal/catalog', (params, body, query) => {
+      const bd = bidderByCode(query.code);
+      const cs = bd ? null : consignorByCode(query.code);
+      if (!bd && !cs) return { status: 404, body: { error: 'Code not recognized' } };
+      const myBidMax = (lotId) => {
+        if (!bd) return null;
+        const mine = db.bids.filter((x) => x.lotId === lotId && x.bidderId === bd.id);
+        return mine.length ? Math.max(...mine.map((x) => x.amount)) : null;
+      };
+      return {
+        status: 200,
+        body: {
+          canBid: !!bd,
+          auctions: db.auctions.filter((a) => a.status !== 'closed')
+            .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+            .map((a) => ({
+              id: a.id, title: a.title, date: a.date, location: a.location, status: a.status,
+              premiumPct: auctionPremiumPct(a),
+              lots: db.lots.filter((l) => l.auctionId === a.id).sort((x, y) => x.lotNumber - y.lotNumber)
+                .map((l) => ({
+                  id: l.id, lotNumber: l.lotNumber, title: l.title, description: l.description,
+                  category: l.category, quantity: l.quantity, startingBid: l.startingBid,
+                  status: l.status, absenteeCount: db.bids.filter((x) => x.lotId === l.id).length,
+                  myBid: myBidMax(l.id),
+                })),
+            })),
+        },
+      };
+    });
+
+    route('POST', '/api/portal/absentee', (params, body) => {
+      const bd = bidderByCode(body.code);
+      if (!bd) return { status: 404, body: { error: 'Code not recognized' } };
+      const lot = findById(db.lots, body.lotId);
+      if (!lot) return { status: 400, body: { error: 'Lot not found' } };
+      if (lot.status !== 'open') return { status: 400, body: { error: 'This lot is no longer open for bids' } };
+      const auction = findById(db.auctions, lot.auctionId);
+      if (!auction || auction.status === 'closed') return { status: 400, body: { error: 'This auction has closed' } };
+      const amount = round2(num(body.amount));
+      if (amount <= 0) return { status: 400, body: { error: 'Bid amount must be positive' } };
+      const prev = db.bids.filter((x) => x.lotId === lot.id && x.bidderId === bd.id);
+      if (prev.length && amount <= Math.max(...prev.map((x) => x.amount))) {
+        return { status: 400, body: { error: 'New bid must be higher than your current bid' } };
+      }
+      const bid = { id: newId(), lotId: lot.id, bidderId: bd.id, amount, time: new Date().toISOString() };
+      db.bids.push(bid);
+      audit('portal.bid', `Portal absentee bid $${amount} on lot ${lot.lotNumber} "${lot.title}" by ${bd.name}`);
+      saveDb();
+      return { status: 201, body: { ok: true, lotNumber: lot.lotNumber, amount } };
     });
 
     // -- reports --

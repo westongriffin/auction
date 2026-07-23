@@ -426,7 +426,8 @@ function openBidderDetail(id) {
         const l = lotById(x.lotId);
         return l ? `<tr><td>Lot ${l.lotNumber} — ${esc(l.title)}</td><td>${esc(auctionById(l.auctionId)?.title || '')}</td>
           <td class="num">${money(x.amount)}</td><td>${badge(l.status)}</td></tr>` : '';
-      }).join('') + '</table>' : ''}`;
+      }).join('') + '</table>' : ''}
+    ${portalSection('bidder', b)}`;
   enhanceTables();
   $('#detail').showModal();
 }
@@ -470,9 +471,22 @@ function openConsignorDetail(id) {
       lots.map((l) => `<tr><td>${esc(auctionById(l.auctionId)?.title || '')}</td><td>${l.lotNumber}</td>
         <td>${esc(l.title)}${l.quantity > 1 ? ` × ${l.quantity}` : ''}</td><td>${badge(l.status)}</td>
         <td class="num">${l.status === 'sold' ? money(lotAmount(l)) : '—'}</td></tr>`).join('') + '</table>'
-      : '<p class="sub">No lots consigned yet.</p>'}`;
+      : '<p class="sub">No lots consigned yet.</p>'}
+    ${portalSection('consignor', c)}`;
   enhanceTables();
   $('#detail').showModal();
+}
+
+function portalSection(kind, person) {
+  return `
+    <h4>Portal access</h4>
+    <p class="sub">${person.portalCode
+      ? `Access code: <strong class="portal-code">${esc(person.portalCode)}</strong> — they sign in at <strong>portal.html</strong> with this code to see ${kind === 'bidder' ? 'their invoices, purchases, and absentee bidding' : 'their items and settlements'}.`
+      : `No portal code issued yet. Issue one so this ${kind === 'bidder' ? 'customer' : 'seller'} can check their account online.`}</p>
+    <div class="head-controls" style="margin-top:6px">
+      <button class="small" data-act="gen-${kind}-code" data-id="${person.id}">${person.portalCode ? 'Rotate code' : 'Issue portal code'}</button>
+      ${person.portalCode ? `<button class="small" data-act="copy-portal" data-code="${esc(person.portalCode)}">Copy invite text</button>` : ''}
+    </div>`;
 }
 
 $('#detail-close').addEventListener('click', () => $('#detail').close());
@@ -1379,6 +1393,19 @@ document.addEventListener('click', (e) => {
   if (act === 'view-bidder') openBidderDetail(id);
   if (act === 'view-consignor') openConsignorDetail(id);
   if (act === 'print-bidder') openPrint('bidder', { id });
+  if (act === 'gen-bidder-code') {
+    run(() => api('POST', `/api/bidders/${id}/portal-code`), 'Portal code issued').then(() => openBidderDetail(id));
+  }
+  if (act === 'gen-consignor-code') {
+    run(() => api('POST', `/api/consignors/${id}/portal-code`), 'Portal code issued').then(() => openConsignorDetail(id));
+  }
+  if (act === 'copy-portal') {
+    const invite = `Check your Brinkley Auctions account online: ${location.origin}/portal.html — your access code is ${btn.dataset.code}`;
+    navigator.clipboard.writeText(invite).then(
+      () => toast('Invite copied — paste it into a text or email'),
+      () => toast(invite, false),
+    );
+  }
 
   if (act === 'edit-auction') {
     const a = auctionById(id);
